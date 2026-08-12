@@ -2,7 +2,8 @@ name: Relógio do Stasis
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Minutos deslocados evitam a fila mais congestionada dos múltiplos de 5.
+    - cron: "2-59/5 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -29,4 +30,3 @@ jobs:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           TIME_ZONE: America/Sao_Paulo
         run: node run.mjs
-
