@@ -1,0 +1,32 @@
+name: Relógio do Stasis
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: stasis-discord-reminders
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  reminders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Baixar o relógio
+        uses: actions/checkout@v4
+
+      - name: Verificar lembretes vencidos
+        env:
+          FIREBASE_PROJECT_ID: stasisrpg
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_SERVICE_EMAIL: ${{ secrets.FIREBASE_SERVICE_EMAIL }}
+          FIREBASE_SERVICE_PASSWORD: ${{ secrets.FIREBASE_SERVICE_PASSWORD }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          TIME_ZONE: America/Sao_Paulo
+        run: node run.mjs
+

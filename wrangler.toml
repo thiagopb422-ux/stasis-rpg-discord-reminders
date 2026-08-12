@@ -1,0 +1,13 @@
+name = "stasis-rpg-discord-reminders"
+main = "src/index.js"
+compatibility_date = "2026-08-12"
+
+[triggers]
+crons = ["*/2 * * * *"]
+
+[vars]
+FIREBASE_PROJECT_ID = "stasisrpg"
+FIREBASE_API_KEY = "AIzaSyAc9PHRgq8JoxNSxEc10J0Fo0YRyFU4ZLA"
+FIREBASE_SERVICE_EMAIL = "stasis.reminders@stasisrpg.app"
+TIME_ZONE = "America/Sao_Paulo"
+
