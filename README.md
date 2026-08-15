@@ -5,7 +5,8 @@ do Windows ou do computador do administrador. O GitHub Actions verifica a cada
 cinco minutos:
 
 - lembretes de sessão de 18 e 5 horas;
-- notificações privadas criadas por mestres no site.
+- notificações privadas criadas por mestres no site, incluindo botões com emoji
+  e uma imagem ou GIF de decoração opcional.
 
 O código é público e mínimo. Tokens, senhas e outras credenciais permanecem nos
 GitHub Encrypted Secrets.
