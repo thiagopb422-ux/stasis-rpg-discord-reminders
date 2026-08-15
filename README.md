@@ -1,43 +1,38 @@
-# Stasis RPG — lembretes autônomos do Discord
+# Stasis RPG — automações autônomas do Discord
 
-O núcleo executa na nuvem pelo GitHub Actions a cada cinco minutos. Ele não
-depende do site estar aberto, do Codex, do Windows ou do computador do mestre.
-O código deste diretório forma um repositório público mínimo; os tokens ficam
-nos Secrets criptografados do GitHub e nunca aparecem no repositório.
+Este serviço executa integralmente online e não depende do site aberto, do Codex,
+do Windows ou do computador do administrador. O GitHub Actions verifica a cada
+cinco minutos:
 
-## Segredos obrigatórios
+- lembretes de sessão de 18 e 5 horas;
+- notificações privadas criadas por mestres no site.
 
-Configure com `wrangler secret put`:
+O código é público e mínimo. Tokens, senhas e outras credenciais permanecem nos
+GitHub Encrypted Secrets.
+
+## Segredos do GitHub
 
 - `DISCORD_BOT_TOKEN`
+- `FIREBASE_API_KEY`
+- `FIREBASE_SERVICE_EMAIL`
 - `FIREBASE_SERVICE_PASSWORD`
-- `RUN_SECRET`
 
-As variáveis públicas e o cron ficam em `wrangler.toml`. Nenhum segredo deve ser
-commitado ou colocado no Firebase Hosting.
-
-## Implantação atual (GitHub Actions gratuito)
-
-O workflow está em `.github/workflows/reminders.yml`. O repositório não contém
-qualquer conteúdo privado do site, somente o relógio. Ele pode ser disparado
-manualmente pela aba Actions e também roda automaticamente por cron.
-
-## Alternativa futura (Cloudflare Worker)
-
-```powershell
-cmd /c npx wrangler login
-cmd /c npx wrangler secret put DISCORD_BOT_TOKEN
-cmd /c npx wrangler secret put FIREBASE_SERVICE_PASSWORD
-cmd /c npx wrangler secret put RUN_SECRET
-cmd /c npx wrangler deploy
-```
-
-O usuário `stasis.reminders@stasisrpg.app` precisa existir no Firebase Auth e
-ter um documento ativo `accessGrants/{uid}` com cargo `master`. Esse usuário é
-exclusivo da automação; não use a conta pessoal do painel.
+O usuário técnico `Stasis Reminder Service` possui acesso estritamente identificado
+nas regras do Firestore. Apenas ele pode mover notificações de `pending` para
+`processing`, `sent` ou `failed`.
 
 ## Idempotência
 
-O Worker reivindica cada aviso com `sessionReminder*ClaimedAt`, envia ao Discord
-e grava `sessionReminder*SentAt` e `sessionReminder*MessageId`. Uma reivindicação
-abandonada expira em dez minutos, permitindo recuperação automática.
+Lembretes e DMs são reivindicados antes do envio. Uma reivindicação abandonada
+expira em dez minutos e pode ser retomada. DMs também usam o ID do evento como nonce
+do Discord. O bridge do Windows não processa mais essa fila; ele conserva somente
+a inspeção para diagnóstico, evitando concorrência entre computador e nuvem.
+
+## Execução
+
+O workflow está em `.github/workflows/reminders.yml` e também pode ser disparado
+manualmente. `node run.mjs` usa as mesmas variáveis do workflow.
+
+O `wrangler.toml` mantém uma alternativa compatível com Cloudflare Worker caso o
+agendador seja migrado no futuro. Os segredos do Worker nunca devem ser incluídos
+no repositório.
