@@ -20,6 +20,7 @@ const payload = directNotificationPayload({
   reason: 'Leitura necessária',
   details: 'Consulte os materiais antes da próxima sessão.',
   subject: 'Personagem Aldren',
+  decorationUrl: 'https://example.com/carta.gif',
   createdByName: 'Nome que não pode aparecer',
   links: [
     { label: 'Contexto', url: 'https://stasisrpg.web.app/sistemastasis', emoji: ':d20:' },
@@ -33,6 +34,12 @@ assert.equal(payload.components[0].components[0].style, 5)
 assert.deepEqual(payload.components[0].components[0].emoji, guildEmojis[0])
 assert.equal(payload.components[0].components[1].emoji.animated, true)
 assert.equal(JSON.stringify(payload).includes('Nome que não pode aparecer'), false)
-assert.equal(payload.embeds[0].image.url.endsWith('.gif'), true)
+assert.equal(payload.embeds[0].image.url, 'https://example.com/carta.gif')
 
-console.log('Automação Discord: payload, links e emojis personalizados aprovados.')
+const fallbackPayload = directNotificationPayload({
+  id: 'notification-fallback', reason: 'Teste', details: 'Detalhes', subject: 'Referência',
+  decorationUrl: 'javascript:alert(1)', links: [],
+})
+assert.equal(fallbackPayload.embeds[0].image.url.endsWith('.gif'), true)
+
+console.log('Automação Discord: payload, links, emojis e decoração personalizada aprovados.')

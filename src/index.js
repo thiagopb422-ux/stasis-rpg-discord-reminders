@@ -282,6 +282,11 @@ export function resolveButtonEmoji(value, guildEmojis = []) {
 
 export function directNotificationPayload(notification, guildEmojis = []) {
   const links = normalizeDirectLinks(notification.links);
+  let artwork = DIRECT_MESSAGE_ARTWORK;
+  try {
+    const parsed = new URL(String(notification.decorationUrl || "").trim());
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") artwork = parsed.toString().slice(0, 512);
+  } catch { /* Campo vazio ou inválido conserva a decoração padrão. */ }
   return {
     content: `${PARCHMENT_EMOJI} **Stasis RPG - Mensagem**`,
     embeds: [{
@@ -289,7 +294,7 @@ export function directNotificationPayload(notification, guildEmojis = []) {
       title: `${DRAGON_EMOJI} ${safe(notification.reason, 180)}`,
       description: safe(notification.details, 1800),
       fields: [{ name: "Referência", value: safe(notification.subject, 160), inline: false }],
-      image: { url: DIRECT_MESSAGE_ARTWORK },
+      image: { url: artwork },
       footer: { text: "Stasis RPG · Comunicação oficial" },
       timestamp: new Date().toISOString(),
     }],
