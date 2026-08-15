@@ -28,6 +28,6 @@ jobs:
           FIREBASE_SERVICE_EMAIL: ${{ secrets.FIREBASE_SERVICE_EMAIL }}
           FIREBASE_SERVICE_PASSWORD: ${{ secrets.FIREBASE_SERVICE_PASSWORD }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_GUILD_ID: 1019386388602425365
+          DISCORD_GUILD_ID: "1019386388602425365"
           TIME_ZONE: America/Sao_Paulo
         run: node run.mjs
