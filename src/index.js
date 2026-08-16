@@ -148,12 +148,30 @@ async function sendDiscord(env, channelId, payload) {
 }
 
 export async function sendDiscordAttachment(env, channelId, payload, filename, contents) {
+  return sendDiscordFiles(env, channelId, payload, [{
+    filename,
+    contents,
+    contentType: "text/plain;charset=utf-8",
+    description: "Ficha completa enviada ao Stasis RPG",
+  }]);
+}
+
+export async function sendDiscordFiles(env, channelId, payload, files) {
   const form = new FormData();
   form.append("payload_json", JSON.stringify({
     ...payload,
-    attachments: [{ id: 0, filename, description: "Ficha completa enviada ao Stasis RPG" }],
+    attachments: files.map((file, index) => ({
+      id: index,
+      filename: file.filename,
+      description: file.description || "Arquivo enviado pelo Stasis RPG",
+    })),
   }));
-  form.append("files[0]", new Blob([contents], { type: "text/plain;charset=utf-8" }), filename);
+  files.forEach((file, index) => {
+    const blob = file.contents instanceof Blob
+      ? file.contents
+      : new Blob([file.contents], { type: file.contentType || "application/octet-stream" });
+    form.append(`files[${index}]`, blob, file.filename);
+  });
   return discord(env, `/channels/${channelId}/messages`, { method: "POST", body: form });
 }
 
@@ -370,7 +388,24 @@ function submissionConfirmationFilename(characterName) {
   return `ficha-${slug}.txt`;
 }
 
-export function submissionConfirmationPayload(confirmation) {
+export function submissionConfirmationPortraitFile(confirmation) {
+  const dataUrl = String(confirmation.portrait?.dataUrl || "");
+  const match = dataUrl.match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!match) return null;
+  const contentType = match[1].toLocaleLowerCase("en-US").replace("image/jpg", "image/jpeg");
+  const extension = contentType === "image/jpeg" ? "jpg" : contentType.slice("image/".length);
+  const filename = submissionConfirmationFilename(confirmation.characterName)
+    .replace(/^ficha-/, "retrato-")
+    .replace(/\.txt$/, `.${extension}`);
+  return {
+    filename,
+    contents: new Blob([base64Bytes(match[2].replace(/\s/g, ""))], { type: contentType }),
+    contentType,
+    description: `Retrato de ${safe(confirmation.characterName, 160)}`,
+  };
+}
+
+export function submissionConfirmationPayload(confirmation, portraitFilename = "") {
   const advantages = traitSummary(confirmation.advantages);
   const weaknesses = traitSummary(confirmation.weaknesses);
   const availability = Array.isArray(confirmation.availability) && confirmation.availability.length
@@ -391,8 +426,9 @@ export function submissionConfirmationPayload(confirmation) {
         { name: "Disponibilidade", value: safe(availability, 256), inline: true },
         { name: "Vantagens", value: safe(advantages, 1024), inline: false },
         { name: "Fraquezas", value: safe(weaknesses, 1024), inline: false },
-        { name: "História e tribo", value: "A ficha completa está no arquivo de texto anexado a esta mensagem.", inline: false },
+        { name: "História e tribo", value: "A ficha completa será enviada no arquivo de texto logo abaixo deste pergaminho.", inline: false },
       ],
+      ...(portraitFilename ? { thumbnail: { url: `attachment://${portraitFilename}` } } : {}),
       image: { url: SUBMISSION_CONFIRMATION_ARTWORK },
       footer: { text: "Stasis RPG · Ficha registrada com sucesso" },
       timestamp: confirmation.submittedAt || new Date().toISOString(),
@@ -431,6 +467,31 @@ export function submissionConfirmationAttachment(confirmation, confirmationId = 
     line,
     "Esta é uma cópia automática dos dados enviados. Aguarde o novo pergaminho após a leitura da equipe Stasis RPG.",
   ].filter((value, index) => value !== "" || index > 0).join("\n");
+}
+
+export async function sendSubmissionConfirmation(env, channelId, confirmation, confirmationId) {
+  const portrait = submissionConfirmationPortraitFile(confirmation);
+  const cardPayload = {
+    ...submissionConfirmationPayload(confirmation, portrait?.filename || ""),
+    nonce: `${confirmationId}-card`,
+    enforce_nonce: true,
+  };
+  const cardMessage = portrait
+    ? await sendDiscordFiles(env, channelId, cardPayload, [portrait])
+    : await sendDiscord(env, channelId, cardPayload);
+  const attachmentMessage = await sendDiscordAttachment(
+    env,
+    channelId,
+    {
+      content: `${PARCHMENT_EMOJI} **Cópia completa da ficha de ${safe(confirmation.characterName, 120)}**\nHistória e tribo seguem no arquivo abaixo.`,
+      allowed_mentions: { parse: [] },
+      nonce: `${confirmationId}-file`,
+      enforce_nonce: true,
+    },
+    submissionConfirmationFilename(confirmation.characterName),
+    submissionConfirmationAttachment(confirmation, confirmationId),
+  );
+  return { cardMessage, attachmentMessage };
 }
 
 async function runDirectNotifications(env, token) {
@@ -531,19 +592,12 @@ async function runSubmissionConfirmations(env, token) {
         method: "POST",
         body: JSON.stringify({ recipient_id: member.user.id }),
       });
-      const payload = submissionConfirmationPayload(details);
-      const message = await sendDiscordAttachment(
-        env,
-        directChannel.id,
-        { ...payload, nonce: confirmation.id, enforce_nonce: true },
-        submissionConfirmationFilename(details.characterName),
-        submissionConfirmationAttachment(details, confirmation.id),
-      );
+      const { cardMessage } = await sendSubmissionConfirmation(env, directChannel.id, details, confirmation.id);
       await patchDocument(env, token, "discordSubmissionConfirmations", confirmation.id, {
         status: "sent",
         processedAt: new Date().toISOString(),
         discordUserId: member.user.id,
-        discordMessageId: message.id || "",
+        discordMessageId: cardMessage.id || "",
         error: "",
         ciphertext: "",
         iv: "",

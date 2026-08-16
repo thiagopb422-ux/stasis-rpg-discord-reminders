@@ -8,7 +8,8 @@ principal e verifica a cada minuto:
 - notificações privadas criadas por mestres no site, incluindo botões com emoji
   e uma imagem ou GIF de decoração opcional.
 - confirmações automáticas de fichas, enviadas após a espera mínima de um minuto,
-  com resumo em embed e a ficha completa em um arquivo de texto anexado.
+  com resumo em embed, a primeira foto como miniatura e a ficha completa em uma
+  segunda mensagem com arquivo de texto anexado.
 
 O código é público e mínimo. Tokens, senhas e outras credenciais permanecem nos
 segredos criptografados da Cloudflare. O GitHub Actions conserva uma cópia dos

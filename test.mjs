@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import {
   directNotificationPayload,
   resolveButtonEmoji,
-  sendDiscordAttachment,
+  sendSubmissionConfirmation,
   submissionConfirmationAttachment,
   submissionConfirmationPayload,
+  submissionConfirmationPortraitFile,
 } from './src/index.js'
 
 const guildEmojis = [
@@ -61,10 +62,20 @@ const confirmation = {
   weaknesses: [{ name: 'Juramento', points: -2 }],
   availability: ['Noite'],
   trama: { id: 'begins', title: 'Begins' },
+  portrait: {
+    name: 'elyra.png',
+    type: 'image/png',
+    dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  },
 }
-const confirmationPayload = submissionConfirmationPayload(confirmation)
+const portraitFile = submissionConfirmationPortraitFile(confirmation)
+assert.equal(portraitFile.filename, 'retrato-elyra-da-nevoa.png')
+assert.equal(portraitFile.contentType, 'image/png')
+assert.equal(submissionConfirmationPortraitFile({ ...confirmation, portrait: null }), null)
+const confirmationPayload = submissionConfirmationPayload(confirmation, portraitFile.filename)
 assert.equal(confirmationPayload.content.includes('Stasis RPG - Ficha recebida'), true)
 assert.equal(confirmationPayload.embeds[0].image.url, 'https://i.pinimg.com/originals/b2/4a/14/b24a14cd5109ef90223cfda09389c6e6.gif')
+assert.equal(confirmationPayload.embeds[0].thumbnail.url, 'attachment://retrato-elyra-da-nevoa.png')
 assert.equal(confirmationPayload.embeds[0].fields.some((field) => field.value.includes('Elyra da Névoa')), true)
 assert.equal(JSON.stringify(confirmationPayload).includes(confirmation.story), false)
 const confirmationAttachment = submissionConfirmationAttachment(confirmation, 'protocolo-teste')
@@ -73,34 +84,41 @@ assert.equal(confirmationAttachment.includes(confirmation.story), true)
 assert.equal(confirmationAttachment.includes('protocolo-teste'), true)
 const longStory = 'Capítulo sem cortes. '.repeat(600)
 const longAttachment = submissionConfirmationAttachment({ ...confirmation, story: longStory }, 'protocolo-longo')
-assert.equal(longAttachment.includes(longStory), true)
+assert.equal(longAttachment.includes(longStory.trim()), true)
 assert.equal(JSON.stringify(submissionConfirmationPayload({ ...confirmation, story: longStory })).includes(longStory), false)
 
 const originalFetch = globalThis.fetch
-let multipartChecked = false
+const sentRequests = []
 globalThis.fetch = async (url, init) => {
   assert.equal(String(url).endsWith('/channels/canal-teste/messages'), true)
   assert.equal(init.headers['content-type'], undefined)
   assert.equal(init.body instanceof FormData, true)
-  const multipartPayload = JSON.parse(init.body.get('payload_json'))
-  assert.equal(multipartPayload.attachments[0].filename, 'ficha-elyra.txt')
-  assert.equal((init.body.get('files[0]')).type, 'text/plain;charset=utf-8')
-  multipartChecked = true
-  return new Response(JSON.stringify({ id: 'mensagem-teste' }), {
+  sentRequests.push(init.body)
+  return new Response(JSON.stringify({ id: `mensagem-${sentRequests.length}` }), {
     status: 200,
     headers: { 'content-type': 'application/json' },
   })
 }
 try {
-  const sent = await sendDiscordAttachment(
+  const sent = await sendSubmissionConfirmation(
     { DISCORD_BOT_TOKEN: 'token-de-teste' },
     'canal-teste',
-    confirmationPayload,
-    'ficha-elyra.txt',
-    confirmationAttachment,
+    confirmation,
+    'protocolo-teste',
   )
-  assert.equal(sent.id, 'mensagem-teste')
-  assert.equal(multipartChecked, true)
+  assert.equal(sent.cardMessage.id, 'mensagem-1')
+  assert.equal(sent.attachmentMessage.id, 'mensagem-2')
+  assert.equal(sentRequests.length, 2)
+  const cardMultipart = sentRequests[0]
+  const cardPayload = JSON.parse(cardMultipart.get('payload_json'))
+  assert.equal(cardPayload.attachments[0].filename, 'retrato-elyra-da-nevoa.png')
+  assert.equal(cardPayload.embeds[0].thumbnail.url, 'attachment://retrato-elyra-da-nevoa.png')
+  assert.equal((cardMultipart.get('files[0]')).type, 'image/png')
+  const fileMultipart = sentRequests[1]
+  const filePayload = JSON.parse(fileMultipart.get('payload_json'))
+  assert.equal(filePayload.attachments[0].filename, 'ficha-elyra-da-nevoa.txt')
+  assert.equal(filePayload.content.includes('História e tribo seguem no arquivo abaixo.'), true)
+  assert.equal((fileMultipart.get('files[0]')).type, 'text/plain;charset=utf-8')
 } finally {
   globalThis.fetch = originalFetch
 }
