@@ -2,8 +2,8 @@ name: Automações do Stasis
 
 on:
   schedule:
-    # Minutos deslocados evitam a fila mais congestionada dos múltiplos de 5.
-    - cron: "2-59/5 * * * *"
+    # Contingência horária. O relógio principal roda na Cloudflare a cada 2 minutos.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 3
     steps:
       - name: Baixar as automações
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Processar lembretes e mensagens privadas
         env:
