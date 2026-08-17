@@ -49,6 +49,21 @@ const fallbackPayload = directNotificationPayload({
 })
 assert.equal(fallbackPayload.embeds[0].image.url.endsWith('.gif'), true)
 
+const generalAlertPayload = directNotificationPayload({
+  id: 'general-alert-test',
+  sourceKind: 'general_alert',
+  reason: 'Atenção, aventureiros',
+  details: 'Uma notícia importante foi publicada.',
+  subject: 'Comunicado importante para a comunidade',
+  links: [
+    { label: 'Desativar Notícias do RPG', url: 'https://stasisrpg.web.app/alertas/desativar?token=teste', emoji: '🔕' },
+  ],
+})
+assert.equal(generalAlertPayload.content.includes('Alerta Importante'), true)
+assert.equal(generalAlertPayload.embeds[0].color, 0xd3a64a)
+assert.equal(generalAlertPayload.embeds[0].title.includes('⚠️'), true)
+assert.equal(generalAlertPayload.components[0].components[0].label, 'Desativar Notícias do RPG')
+
 const confirmation = {
   submittedAt: '2026-08-15T23:40:00.000Z',
   playerName: 'Aventureira',

@@ -10,6 +10,8 @@ principal e verifica a cada minuto:
 - confirmações automáticas de fichas, enviadas após a espera mínima de um minuto,
   com resumo em embed, a primeira foto como miniatura e a ficha completa em uma
   segunda mensagem com arquivo de texto anexado.
+- alertas gerais excepcionais, enviados em lotes seguros de até 50 DMs por minuto,
+  com notícia vinculada e opção individual de desativar futuros comunicados.
 
 O código é público e mínimo. Tokens, senhas e outras credenciais permanecem nos
 segredos criptografados da Cloudflare. O GitHub Actions conserva uma cópia dos
@@ -25,6 +27,14 @@ segredos necessários e roda apenas como contingência horária ou manual.
 O intervalo de um minuto permite que a confirmação seja entregue normalmente
 entre um e dois minutos após o envio. Uma indisponibilidade geral do provedor
 continua sendo uma exceção possível, como em qualquer serviço externo.
+
+## Preferências dos alertas gerais
+
+Cada destinatário recebe um botão exclusivo para desativar notícias. O site pede
+o mesmo usuário do Discord e o Worker compara somente a impressão SHA-256 desse
+contato com um token aleatório de uso individual. A preferência não apaga ficha,
+personagem ou conta: ela cria uma supressão permanente apenas para alertas gerais.
+O Worker confere a supressão outra vez imediatamente antes de cada DM.
 
 ## Segredos
 

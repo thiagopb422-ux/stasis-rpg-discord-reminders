@@ -8,6 +8,7 @@ const DRAGON_EMOJI = "<:dragao:1124393908441464873>";
 const DIRECT_MESSAGE_ARTWORK = "https://i.pinimg.com/originals/cd/f7/29/cdf729fcc599dee31ee6b78ed4dbb71b.gif";
 const SUBMISSION_CONFIRMATION_ARTWORK = "https://i.pinimg.com/originals/b2/4a/14/b24a14cd5109ef90223cfda09389c6e6.gif";
 const SUBMISSION_CONFIRMATION_DELAY_MS = 60 * 1000;
+const MAX_DIRECT_NOTIFICATIONS_PER_RUN = 50;
 
 const REMINDER_DEFINITIONS = [
   { hours: 18, atField: "sessionReminder18At", sentAtField: "sessionReminder18SentAt", messageField: "sessionReminder18MessageId", claimField: "sessionReminder18ClaimedAt" },
@@ -117,6 +118,27 @@ async function patchDocument(env, token, collectionName, id, patch, updateTime =
   return decodeDocument(await response.json());
 }
 
+async function getDocument(env, token, collectionName, id) {
+  const response = await fetch(
+    `${firestoreRoot(env)}/${collectionName}/${encodeURIComponent(id)}`,
+    { headers: { authorization: `Bearer ${token}` } },
+  );
+  if (response.status === 404) return null;
+  if (!response.ok)
+    throw new Error(`${collectionName}/${id}: ${response.status} ${await response.text()}`);
+  return decodeDocument(await response.json());
+}
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(String(value || "")),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 async function discord(env, path, init = {}) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const multipart = typeof FormData !== "undefined" && init.body instanceof FormData;
@@ -145,6 +167,27 @@ async function discordMaybe(env, path, init = {}) {
 
 async function sendDiscord(env, channelId, payload) {
   return discord(env, `/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+function publicJson(request, body, status = 200) {
+  const origin = request.headers.get("origin") || "";
+  const allowedOrigins = new Set([
+    "https://stasisrpg.web.app",
+    "https://stasisrpg.firebaseapp.com",
+  ]);
+  return new Response(JSON.stringify(body, null, 2), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "access-control-allow-origin": allowedOrigins.has(origin)
+        ? origin
+        : "https://stasisrpg.web.app",
+      "access-control-allow-methods": "POST, OPTIONS",
+      "access-control-allow-headers": "content-type",
+      "vary": "Origin",
+    },
+  });
 }
 
 export async function sendDiscordAttachment(env, channelId, payload, filename, contents) {
@@ -349,15 +392,22 @@ export function directNotificationPayload(notification, guildEmojis = []) {
     const parsed = new URL(String(notification.decorationUrl || "").trim());
     if (parsed.protocol === "http:" || parsed.protocol === "https:") artwork = parsed.toString().slice(0, 512);
   } catch { /* Campo vazio ou inválido conserva a decoração padrão. */ }
+  const isGeneralAlert = notification.sourceKind === "general_alert";
   return {
-    content: `${PARCHMENT_EMOJI} **Stasis RPG - Mensagem**`,
+    content: isGeneralAlert
+      ? `${PARCHMENT_EMOJI} **Stasis RPG - Alerta Importante**`
+      : `${PARCHMENT_EMOJI} **Stasis RPG - Mensagem**`,
     embeds: [{
-      color: 0x9d6aba,
-      title: `${DRAGON_EMOJI} ${safe(notification.reason, 180)}`,
+      color: isGeneralAlert ? 0xd3a64a : 0x9d6aba,
+      title: `${isGeneralAlert ? "⚠️" : DRAGON_EMOJI} ${safe(notification.reason, 180)}`,
       description: safe(notification.details, 1800),
       fields: [{ name: "Referência", value: safe(notification.subject, 160), inline: false }],
       image: { url: artwork },
-      footer: { text: "Stasis RPG · Comunicação oficial" },
+      footer: {
+        text: isGeneralAlert
+          ? "Stasis RPG · Notícia importante para a comunidade"
+          : "Stasis RPG · Comunicação oficial",
+      },
       timestamp: new Date().toISOString(),
     }],
     ...(links.length ? { components: [{ type: 1, components: links.map((link) => ({
@@ -501,13 +551,18 @@ async function runDirectNotifications(env, token) {
     listCollectionEqual(env, token, "discordDirectNotifications", "status", "processing"),
   ]);
   const retryBefore = Date.now() - CLAIM_TTL_MS;
-  const notifications = groups.flat().filter((item) => item.status === "pending" || (
+  const eligibleNotifications = groups.flat().filter((item) => item.status === "pending" || (
     item.status === "processing" && new Date(item.claimedAt || 0).getTime() < retryBefore
   )).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  const notifications = eligibleNotifications.slice(0, MAX_DIRECT_NOTIFICATIONS_PER_RUN);
   const guildId = env.DISCORD_GUILD_ID || DEFAULT_GUILD_ID;
   const guildEmojis = notifications.length ? await discord(env, `/guilds/${guildId}/emojis`) : [];
+  const optOutHashes = notifications.some((item) => item.sourceKind === "general_alert")
+    ? new Set((await listCollection(env, token, "discordGeneralAlertOptOuts")).map((item) => item.id))
+    : new Set();
   let sent = 0;
   let failed = 0;
+  let suppressed = 0;
   const deliveryFailures = [];
   const systemErrors = [];
 
@@ -523,6 +578,18 @@ async function runDirectNotifications(env, token) {
       continue;
     }
     try {
+      if (
+        claimed.sourceKind === "general_alert" &&
+        optOutHashes.has(await sha256Hex(normalizeDiscordIdentity(claimed.targetDiscord)))
+      ) {
+        await patchDocument(env, token, "discordDirectNotifications", notification.id, {
+          status: "failed",
+          processedAt: new Date().toISOString(),
+          error: "Alerta geral não enviado: notícias desativadas pelo destinatário.",
+        }, claimed._updateTime);
+        suppressed += 1;
+        continue;
+      }
       const member = await findGuildMember(env, notification.targetDiscord);
       const directChannel = await discord(env, "/users/@me/channels", { method: "POST", body: JSON.stringify({ recipient_id: member.user.id }) });
       const message = await sendDiscord(env, directChannel.id, directNotificationPayload(notification, guildEmojis));
@@ -548,9 +615,12 @@ async function runDirectNotifications(env, token) {
     startedAt,
     finishedAt: new Date().toISOString(),
     inspected: groups.flat().length,
-    eligible: notifications.length,
+    eligible: eligibleNotifications.length,
+    processedThisRun: notifications.length,
+    remaining: Math.max(0, eligibleNotifications.length - notifications.length),
     sent,
     failed,
+    suppressed,
     deliveryFailures,
     systemErrors,
   };
@@ -635,6 +705,58 @@ async function runSubmissionConfirmations(env, token) {
   };
 }
 
+async function unsubscribeFromGeneralAlerts(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return publicJson(request, { ok: false, error: "Pedido inválido." }, 400);
+  }
+  const tokenId = String(body?.token || "").trim();
+  const discordUser = String(body?.discordUser || "").trim();
+  if (!/^[a-f0-9]{64}$/i.test(tokenId) || discordUser.length < 2 || discordUser.length > 80)
+    return publicJson(request, { ok: false, error: "Confira o link e o usuário informado." }, 400);
+  try {
+    const firebaseToken = await firebaseAccessToken(env);
+    const tokenDocument = await getDocument(
+      env,
+      firebaseToken,
+      "discordGeneralAlertTokens",
+      tokenId,
+    );
+    if (!tokenDocument)
+      return publicJson(request, { ok: false, error: "Este link não é válido ou não está mais disponível." }, 404);
+    if (new Date(tokenDocument.expiresAt || 0).getTime() < Date.now())
+      return publicJson(request, { ok: false, error: "Este link expirou. Fale com a equipe Stasis RPG." }, 410);
+    const targetHash = await sha256Hex(normalizeDiscordIdentity(discordUser));
+    if (targetHash !== tokenDocument.targetHash)
+      return publicJson(request, { ok: false, error: "O usuário informado não corresponde ao destinatário deste pergaminho." }, 403);
+
+    const existing = await getDocument(
+      env,
+      firebaseToken,
+      "discordGeneralAlertOptOuts",
+      targetHash,
+    );
+    const now = new Date().toISOString();
+    if (!existing)
+      await patchDocument(env, firebaseToken, "discordGeneralAlertOptOuts", targetHash, {
+        targetHash,
+        tokenId,
+        createdAt: now,
+      });
+    if (!tokenDocument.used)
+      await patchDocument(env, firebaseToken, "discordGeneralAlertTokens", tokenId, {
+        used: true,
+        usedAt: now,
+      }, tokenDocument._updateTime);
+    return publicJson(request, { ok: true });
+  } catch (error) {
+    console.error("general-alert-unsubscribe", error);
+    return publicJson(request, { ok: false, error: "O serviço não conseguiu concluir agora. Tente novamente em instantes." }, 500);
+  }
+}
+
 export async function runAutomation(env) {
   const startedAt = new Date().toISOString();
   const token = await firebaseAccessToken(env);
@@ -658,7 +780,11 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/health")
-      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-reminders", "direct-notifications", "submission-confirmations"] });
+      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-reminders", "direct-notifications", "submission-confirmations", "general-alerts"] });
+    if (url.pathname === "/general-alerts/unsubscribe" && request.method === "OPTIONS")
+      return publicJson(request, { ok: true });
+    if (url.pathname === "/general-alerts/unsubscribe" && request.method === "POST")
+      return unsubscribeFromGeneralAlerts(request, env);
     if (url.pathname === "/run" && request.headers.get("authorization") === `Bearer ${env.RUN_SECRET}`)
       return json(await runAutomation(env));
     return json({ ok: false, error: "Not found" }, 404);
