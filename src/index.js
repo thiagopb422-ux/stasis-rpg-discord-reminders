@@ -6,6 +6,11 @@ const CLAIM_TTL_MS = 10 * 60 * 1000;
 const PARCHMENT_EMOJI = "<:pergaminho:1166442960183885844>";
 const DRAGON_EMOJI = "<:dragao:1124393908441464873>";
 const DIRECT_MESSAGE_ARTWORK = "https://i.pinimg.com/originals/cd/f7/29/cdf729fcc599dee31ee6b78ed4dbb71b.gif";
+const SUBMISSION_CONFIRMATION_ARTWORK = "https://i.pinimg.com/originals/b2/4a/14/b24a14cd5109ef90223cfda09389c6e6.gif";
+const SUBMISSION_CONFIRMATION_DELAY_MS = 60 * 1000;
+const MAX_DIRECT_NOTIFICATIONS_PER_RUN = 50;
+const MAX_SUBMISSION_CONFIRMATIONS_PER_RUN = 20;
+const MAX_DUE_REMINDERS_PER_STAGE = 25;
 
 const REMINDER_DEFINITIONS = [
   { hours: 18, atField: "sessionReminder18At", sentAtField: "sessionReminder18SentAt", messageField: "sessionReminder18MessageId", claimField: "sessionReminder18ClaimedAt" },
@@ -82,7 +87,7 @@ async function listCollection(env, token, name) {
   return items;
 }
 
-async function listCollectionEqual(env, token, name, field, value) {
+async function listCollectionEqual(env, token, name, field, value, limit = 50) {
   const response = await fetch(`${firestoreRoot(env)}:runQuery`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -90,10 +95,35 @@ async function listCollectionEqual(env, token, name, field, value) {
       structuredQuery: {
         from: [{ collectionId: name }],
         where: { fieldFilter: { field: { fieldPath: field }, op: "EQUAL", value: encodeValue(value) } },
+        limit: Math.max(1, Math.min(100, Number(limit) || 50)),
       },
     }),
   });
   if (!response.ok) throw new Error(`${name} (${field}=${value}): ${response.status} ${await response.text()}`);
+  const rows = await response.json();
+  return rows.flatMap((row) => row.document ? [decodeDocument(row.document)] : []);
+}
+
+async function listCollectionDue(env, token, name, field, now, limit = MAX_DUE_REMINDERS_PER_STAGE) {
+  const response = await fetch(`${firestoreRoot(env)}:runQuery`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: name }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: field },
+            op: "LESS_THAN_OR_EQUAL",
+            value: encodeValue(now),
+          },
+        },
+        orderBy: [{ field: { fieldPath: field }, direction: "DESCENDING" }],
+        limit: Math.max(1, Math.min(100, Number(limit) || MAX_DUE_REMINDERS_PER_STAGE)),
+      },
+    }),
+  });
+  if (!response.ok) throw new Error(`${name} (${field}<=${now}): ${response.status} ${await response.text()}`);
   const rows = await response.json();
   return rows.flatMap((row) => row.document ? [decodeDocument(row.document)] : []);
 }
@@ -115,11 +145,37 @@ async function patchDocument(env, token, collectionName, id, patch, updateTime =
   return decodeDocument(await response.json());
 }
 
+async function getDocument(env, token, collectionName, id) {
+  const response = await fetch(
+    `${firestoreRoot(env)}/${collectionName}/${encodeURIComponent(id)}`,
+    { headers: { authorization: `Bearer ${token}` } },
+  );
+  if (response.status === 404) return null;
+  if (!response.ok)
+    throw new Error(`${collectionName}/${id}: ${response.status} ${await response.text()}`);
+  return decodeDocument(await response.json());
+}
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(String(value || "")),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 async function discord(env, path, init = {}) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
+    const multipart = typeof FormData !== "undefined" && init.body instanceof FormData;
     const response = await fetch(`${DISCORD_API}${path}`, {
       ...init,
-      headers: { authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, "content-type": "application/json", ...(init.headers || {}) },
+      headers: {
+        authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
+        ...(multipart ? {} : { "content-type": "application/json" }),
+        ...(init.headers || {}),
+      },
     });
     if (response.status === 429) {
       const body = await response.json().catch(() => ({}));
@@ -138,6 +194,82 @@ async function discordMaybe(env, path, init = {}) {
 
 async function sendDiscord(env, channelId, payload) {
   return discord(env, `/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+function publicJson(request, body, status = 200) {
+  const origin = request.headers.get("origin") || "";
+  const allowedOrigins = new Set([
+    "https://stasisrpg.web.app",
+    "https://stasisrpg.firebaseapp.com",
+  ]);
+  return new Response(JSON.stringify(body, null, 2), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "access-control-allow-origin": allowedOrigins.has(origin)
+        ? origin
+        : "https://stasisrpg.web.app",
+      "access-control-allow-methods": "POST, OPTIONS",
+      "access-control-allow-headers": "content-type",
+      "vary": "Origin",
+    },
+  });
+}
+
+export async function sendDiscordAttachment(env, channelId, payload, filename, contents) {
+  return sendDiscordFiles(env, channelId, payload, [{
+    filename,
+    contents,
+    contentType: "text/plain;charset=utf-8",
+    description: "Ficha completa enviada ao Stasis RPG",
+  }]);
+}
+
+export async function sendDiscordFiles(env, channelId, payload, files) {
+  const form = new FormData();
+  form.append("payload_json", JSON.stringify({
+    ...payload,
+    attachments: files.map((file, index) => ({
+      id: index,
+      filename: file.filename,
+      description: file.description || "Arquivo enviado pelo Stasis RPG",
+    })),
+  }));
+  files.forEach((file, index) => {
+    const blob = file.contents instanceof Blob
+      ? file.contents
+      : new Blob([file.contents], { type: file.contentType || "application/octet-stream" });
+    form.append(`files[${index}]`, blob, file.filename);
+  });
+  return discord(env, `/channels/${channelId}/messages`, { method: "POST", body: form });
+}
+
+function base64Bytes(value) {
+  const binary = atob(String(value || ""));
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+async function decryptSubmissionConfirmation(env, confirmation) {
+  const privateKey = await crypto.subtle.importKey(
+    "jwk",
+    JSON.parse(env.SUBMISSION_CONFIRMATION_PRIVATE_KEY),
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    false,
+    ["decrypt"],
+  );
+  const rawAesKey = await crypto.subtle.decrypt(
+    { name: "RSA-OAEP" },
+    privateKey,
+    base64Bytes(confirmation.wrappedKey),
+  );
+  const aesKey = await crypto.subtle.importKey("raw", rawAesKey, { name: "AES-GCM" }, false, ["decrypt"]);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64Bytes(confirmation.iv) },
+    aesKey,
+    base64Bytes(confirmation.ciphertext),
+  );
+  return JSON.parse(new TextDecoder().decode(plaintext));
 }
 
 function sessionLabel(startsAt, timeZone) {
@@ -195,7 +327,18 @@ function reminderIsDue(book, definition, now) {
 export async function runReminders(env, token = null) {
   const startedAt = new Date().toISOString();
   const firebaseToken = token || await firebaseAccessToken(env);
-  const books = await listCollection(env, firebaseToken, "masterBooks");
+  const dueGroups = await Promise.all(
+    REMINDER_DEFINITIONS.map((definition) =>
+      listCollectionDue(
+        env,
+        firebaseToken,
+        "masterBooks",
+        definition.atField,
+        startedAt,
+      ),
+    ),
+  );
+  const books = [...new Map(dueGroups.flat().map((book) => [book.id, book])).values()];
   const now = Date.now();
   let sent = 0;
   const errors = [];
@@ -287,15 +430,22 @@ export function directNotificationPayload(notification, guildEmojis = []) {
     const parsed = new URL(String(notification.decorationUrl || "").trim());
     if (parsed.protocol === "http:" || parsed.protocol === "https:") artwork = parsed.toString().slice(0, 512);
   } catch { /* Campo vazio ou inválido conserva a decoração padrão. */ }
+  const isGeneralAlert = notification.sourceKind === "general_alert";
   return {
-    content: `${PARCHMENT_EMOJI} **Stasis RPG - Mensagem**`,
+    content: isGeneralAlert
+      ? `${PARCHMENT_EMOJI} **Stasis RPG - Alerta Importante**`
+      : `${PARCHMENT_EMOJI} **Stasis RPG - Mensagem**`,
     embeds: [{
-      color: 0x9d6aba,
-      title: `${DRAGON_EMOJI} ${safe(notification.reason, 180)}`,
+      color: isGeneralAlert ? 0xd3a64a : 0x9d6aba,
+      title: `${isGeneralAlert ? "⚠️" : DRAGON_EMOJI} ${safe(notification.reason, 180)}`,
       description: safe(notification.details, 1800),
       fields: [{ name: "Referência", value: safe(notification.subject, 160), inline: false }],
       image: { url: artwork },
-      footer: { text: "Stasis RPG · Comunicação oficial" },
+      footer: {
+        text: isGeneralAlert
+          ? "Stasis RPG · Notícia importante para a comunidade"
+          : "Stasis RPG · Comunicação oficial",
+      },
       timestamp: new Date().toISOString(),
     }],
     ...(links.length ? { components: [{ type: 1, components: links.map((link) => ({
@@ -307,20 +457,150 @@ export function directNotificationPayload(notification, guildEmojis = []) {
   };
 }
 
+function traitSummary(items) {
+  if (!Array.isArray(items) || !items.length) return "Não informado";
+  return items.map((item) => {
+    const points = Number(item?.points || 0);
+    return `${points > 0 ? "+" : ""}${points} ${String(item?.name || "Escolha sem nome").trim()}`;
+  }).join(" · ");
+}
+
+function submissionConfirmationFilename(characterName) {
+  const slug = String(characterName || "personagem")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60) || "personagem";
+  return `ficha-${slug}.txt`;
+}
+
+export function submissionConfirmationPortraitFile(confirmation) {
+  const dataUrl = String(confirmation.portrait?.dataUrl || "");
+  const match = dataUrl.match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!match) return null;
+  const contentType = match[1].toLocaleLowerCase("en-US").replace("image/jpg", "image/jpeg");
+  const extension = contentType === "image/jpeg" ? "jpg" : contentType.slice("image/".length);
+  const filename = submissionConfirmationFilename(confirmation.characterName)
+    .replace(/^ficha-/, "retrato-")
+    .replace(/\.txt$/, `.${extension}`);
+  return {
+    filename,
+    contents: new Blob([base64Bytes(match[2].replace(/\s/g, ""))], { type: contentType }),
+    contentType,
+    description: `Retrato de ${safe(confirmation.characterName, 160)}`,
+  };
+}
+
+export function submissionConfirmationPayload(confirmation, portraitFilename = "") {
+  const advantages = traitSummary(confirmation.advantages);
+  const weaknesses = traitSummary(confirmation.weaknesses);
+  const availability = Array.isArray(confirmation.availability) && confirmation.availability.length
+    ? confirmation.availability.join(", ")
+    : "Não informada";
+  return {
+    content: `${PARCHMENT_EMOJI} **Stasis RPG - Ficha recebida**`,
+    embeds: [{
+      color: 0x9d6aba,
+      title: `${DRAGON_EMOJI} Confirmação de recebimento`,
+      description: "Olá, aventureiro(a)! Sua ficha foi recebida com sucesso em nosso sistema. Obrigado pela participação. Fique atento ao seu Discord: assim que ela for lida, enviaremos um novo pergaminho!",
+      fields: [
+        { name: "Personagem", value: safe(confirmation.characterName, 256), inline: true },
+        { name: "Trama", value: safe(confirmation.trama?.title || "Stasis RPG", 256), inline: true },
+        { name: "Raça", value: safe(confirmation.race, 256), inline: true },
+        { name: "Classe", value: safe(confirmation.className, 256), inline: true },
+        { name: "Idade", value: safe(confirmation.characterAge, 256), inline: true },
+        { name: "Disponibilidade", value: safe(availability, 256), inline: true },
+        { name: "Vantagens", value: safe(advantages, 1024), inline: false },
+        { name: "Fraquezas", value: safe(weaknesses, 1024), inline: false },
+        { name: "História e tribo", value: "A ficha completa será enviada no arquivo de texto logo abaixo deste pergaminho.", inline: false },
+      ],
+      ...(portraitFilename ? { thumbnail: { url: `attachment://${portraitFilename}` } } : {}),
+      image: { url: SUBMISSION_CONFIRMATION_ARTWORK },
+      footer: { text: "Stasis RPG · Ficha registrada com sucesso" },
+      timestamp: confirmation.submittedAt || new Date().toISOString(),
+    }],
+    allowed_mentions: { parse: [] },
+  };
+}
+
+export function submissionConfirmationAttachment(confirmation, confirmationId = "") {
+  const line = "=".repeat(72);
+  return [
+    "STASIS RPG — CÓPIA DA FICHA RECEBIDA",
+    line,
+    confirmationId ? `Protocolo: ${confirmationId}` : "",
+    `Enviada em: ${confirmation.submittedAt || "Não informado"}`,
+    `Jogador(a): ${confirmation.playerName || "Não informado"}`,
+    `Personagem: ${confirmation.characterName || "Não informado"}`,
+    `Trama: ${confirmation.trama?.title || "Stasis RPG"}`,
+    `Raça: ${confirmation.race || "Não informada"}`,
+    `Classe: ${confirmation.className || "Não informada"}`,
+    `Idade: ${confirmation.characterAge || "Não informada"}`,
+    `Disponibilidade: ${Array.isArray(confirmation.availability) ? confirmation.availability.join(", ") : "Não informada"}`,
+    "",
+    "VANTAGENS",
+    traitSummary(confirmation.advantages),
+    "",
+    "FRAQUEZAS",
+    traitSummary(confirmation.weaknesses),
+    "",
+    "FAMÍLIA OU TRIBO",
+    String(confirmation.familyTribe || "Não informado").trim(),
+    "",
+    "HISTÓRIA",
+    String(confirmation.story || "Não informada").trim(),
+    "",
+    line,
+    "Esta é uma cópia automática dos dados enviados. Aguarde o novo pergaminho após a leitura da equipe Stasis RPG.",
+  ].filter((value, index) => value !== "" || index > 0).join("\n");
+}
+
+export async function sendSubmissionConfirmation(env, channelId, confirmation, confirmationId) {
+  const portrait = submissionConfirmationPortraitFile(confirmation);
+  const cardPayload = {
+    ...submissionConfirmationPayload(confirmation, portrait?.filename || ""),
+    nonce: `${confirmationId}-card`,
+    enforce_nonce: true,
+  };
+  const cardMessage = portrait
+    ? await sendDiscordFiles(env, channelId, cardPayload, [portrait])
+    : await sendDiscord(env, channelId, cardPayload);
+  const attachmentMessage = await sendDiscordAttachment(
+    env,
+    channelId,
+    {
+      content: `${PARCHMENT_EMOJI} **Cópia completa da ficha de ${safe(confirmation.characterName, 120)}**\nHistória e tribo seguem no arquivo abaixo.`,
+      allowed_mentions: { parse: [] },
+      nonce: `${confirmationId}-file`,
+      enforce_nonce: true,
+    },
+    submissionConfirmationFilename(confirmation.characterName),
+    submissionConfirmationAttachment(confirmation, confirmationId),
+  );
+  return { cardMessage, attachmentMessage };
+}
+
 async function runDirectNotifications(env, token) {
   const startedAt = new Date().toISOString();
   const groups = await Promise.all([
-    listCollectionEqual(env, token, "discordDirectNotifications", "status", "pending"),
-    listCollectionEqual(env, token, "discordDirectNotifications", "status", "processing"),
+    listCollectionEqual(env, token, "discordDirectNotifications", "status", "pending", MAX_DIRECT_NOTIFICATIONS_PER_RUN),
+    listCollectionEqual(env, token, "discordDirectNotifications", "status", "processing", MAX_DIRECT_NOTIFICATIONS_PER_RUN),
   ]);
   const retryBefore = Date.now() - CLAIM_TTL_MS;
-  const notifications = groups.flat().filter((item) => item.status === "pending" || (
+  const eligibleNotifications = groups.flat().filter((item) => item.status === "pending" || (
     item.status === "processing" && new Date(item.claimedAt || 0).getTime() < retryBefore
   )).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  const notifications = eligibleNotifications.slice(0, MAX_DIRECT_NOTIFICATIONS_PER_RUN);
   const guildId = env.DISCORD_GUILD_ID || DEFAULT_GUILD_ID;
   const guildEmojis = notifications.length ? await discord(env, `/guilds/${guildId}/emojis`) : [];
+  const optOutHashes = notifications.some((item) => item.sourceKind === "general_alert")
+    ? new Set((await listCollection(env, token, "discordGeneralAlertOptOuts")).map((item) => item.id))
+    : new Set();
   let sent = 0;
   let failed = 0;
+  let suppressed = 0;
   const deliveryFailures = [];
   const systemErrors = [];
 
@@ -336,6 +616,18 @@ async function runDirectNotifications(env, token) {
       continue;
     }
     try {
+      if (
+        claimed.sourceKind === "general_alert" &&
+        optOutHashes.has(await sha256Hex(normalizeDiscordIdentity(claimed.targetDiscord)))
+      ) {
+        await patchDocument(env, token, "discordDirectNotifications", notification.id, {
+          status: "failed",
+          processedAt: new Date().toISOString(),
+          error: "Alerta geral não enviado: notícias desativadas pelo destinatário.",
+        }, claimed._updateTime);
+        suppressed += 1;
+        continue;
+      }
       const member = await findGuildMember(env, notification.targetDiscord);
       const directChannel = await discord(env, "/users/@me/channels", { method: "POST", body: JSON.stringify({ recipient_id: member.user.id }) });
       const message = await sendDiscord(env, directChannel.id, directNotificationPayload(notification, guildEmojis));
@@ -361,7 +653,91 @@ async function runDirectNotifications(env, token) {
     startedAt,
     finishedAt: new Date().toISOString(),
     inspected: groups.flat().length,
-    eligible: notifications.length,
+    eligible: eligibleNotifications.length,
+    processedThisRun: notifications.length,
+    remaining: Math.max(0, eligibleNotifications.length - notifications.length),
+    sent,
+    failed,
+    suppressed,
+    deliveryFailures,
+    systemErrors,
+  };
+}
+
+async function runSubmissionConfirmations(env, token) {
+  const startedAt = new Date().toISOString();
+  const groups = await Promise.all([
+    listCollectionEqual(env, token, "discordSubmissionConfirmations", "status", "pending", MAX_SUBMISSION_CONFIRMATIONS_PER_RUN),
+    listCollectionEqual(env, token, "discordSubmissionConfirmations", "status", "processing", MAX_SUBMISSION_CONFIRMATIONS_PER_RUN),
+  ]);
+  const now = Date.now();
+  const retryBefore = now - CLAIM_TTL_MS;
+  const eligibleConfirmations = groups.flat().filter((item) => (
+    item.status === "pending"
+      ? new Date(item.createdAt || 0).getTime() + SUBMISSION_CONFIRMATION_DELAY_MS <= now
+      : item.status === "processing" && new Date(item.claimedAt || 0).getTime() < retryBefore
+  )).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  const confirmations = eligibleConfirmations.slice(0, MAX_SUBMISSION_CONFIRMATIONS_PER_RUN);
+  let sent = 0;
+  let failed = 0;
+  const deliveryFailures = [];
+  const systemErrors = [];
+
+  for (const confirmation of confirmations) {
+    const claimedAt = new Date().toISOString();
+    let claimed;
+    try {
+      claimed = await patchDocument(env, token, "discordSubmissionConfirmations", confirmation.id, {
+        status: "processing", claimedAt, error: "",
+      }, confirmation._updateTime);
+    } catch (error) {
+      systemErrors.push({ confirmationId: confirmation.id, stage: "claim", error: String(error?.message || error).slice(0, 500) });
+      continue;
+    }
+    try {
+      const details = await decryptSubmissionConfirmation(env, claimed);
+      const member = await findGuildMember(env, details.targetDiscord);
+      const directChannel = await discord(env, "/users/@me/channels", {
+        method: "POST",
+        body: JSON.stringify({ recipient_id: member.user.id }),
+      });
+      const { cardMessage } = await sendSubmissionConfirmation(env, directChannel.id, details, confirmation.id);
+      await patchDocument(env, token, "discordSubmissionConfirmations", confirmation.id, {
+        status: "sent",
+        processedAt: new Date().toISOString(),
+        discordUserId: member.user.id,
+        discordMessageId: cardMessage.id || "",
+        error: "",
+        ciphertext: "",
+        iv: "",
+        wrappedKey: "",
+      }, claimed._updateTime);
+      sent += 1;
+    } catch (error) {
+      const message = String(error?.message || error).slice(0, 500);
+      try {
+        await patchDocument(env, token, "discordSubmissionConfirmations", confirmation.id, {
+          status: "failed",
+          processedAt: new Date().toISOString(),
+          error: message,
+          ciphertext: "",
+          iv: "",
+          wrappedKey: "",
+        });
+        failed += 1;
+        deliveryFailures.push({ confirmationId: confirmation.id, error: message });
+      } catch (patchError) {
+        systemErrors.push({ confirmationId: confirmation.id, stage: "failure-persist", error: String(patchError?.message || patchError).slice(0, 500) });
+      }
+    }
+  }
+  return {
+    ok: systemErrors.length === 0,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    inspected: groups.flat().length,
+    eligible: confirmations.length,
+    remaining: Math.max(0, eligibleConfirmations.length - confirmations.length),
     sent,
     failed,
     deliveryFailures,
@@ -369,17 +745,71 @@ async function runDirectNotifications(env, token) {
   };
 }
 
+async function unsubscribeFromGeneralAlerts(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return publicJson(request, { ok: false, error: "Pedido inválido." }, 400);
+  }
+  const tokenId = String(body?.token || "").trim();
+  const discordUser = String(body?.discordUser || "").trim();
+  if (!/^[a-f0-9]{64}$/i.test(tokenId) || discordUser.length < 2 || discordUser.length > 80)
+    return publicJson(request, { ok: false, error: "Confira o link e o usuário informado." }, 400);
+  try {
+    const firebaseToken = await firebaseAccessToken(env);
+    const tokenDocument = await getDocument(
+      env,
+      firebaseToken,
+      "discordGeneralAlertTokens",
+      tokenId,
+    );
+    if (!tokenDocument)
+      return publicJson(request, { ok: false, error: "Este link não é válido ou não está mais disponível." }, 404);
+    if (new Date(tokenDocument.expiresAt || 0).getTime() < Date.now())
+      return publicJson(request, { ok: false, error: "Este link expirou. Fale com a equipe Stasis RPG." }, 410);
+    const targetHash = await sha256Hex(normalizeDiscordIdentity(discordUser));
+    if (targetHash !== tokenDocument.targetHash)
+      return publicJson(request, { ok: false, error: "O usuário informado não corresponde ao destinatário deste pergaminho." }, 403);
+
+    const existing = await getDocument(
+      env,
+      firebaseToken,
+      "discordGeneralAlertOptOuts",
+      targetHash,
+    );
+    const now = new Date().toISOString();
+    if (!existing)
+      await patchDocument(env, firebaseToken, "discordGeneralAlertOptOuts", targetHash, {
+        targetHash,
+        tokenId,
+        createdAt: now,
+      });
+    if (!tokenDocument.used)
+      await patchDocument(env, firebaseToken, "discordGeneralAlertTokens", tokenId, {
+        used: true,
+        usedAt: now,
+      }, tokenDocument._updateTime);
+    return publicJson(request, { ok: true });
+  } catch (error) {
+    console.error("general-alert-unsubscribe", error);
+    return publicJson(request, { ok: false, error: "O serviço não conseguiu concluir agora. Tente novamente em instantes." }, 500);
+  }
+}
+
 export async function runAutomation(env) {
   const startedAt = new Date().toISOString();
   const token = await firebaseAccessToken(env);
   const reminders = await runReminders(env, token);
   const directNotifications = await runDirectNotifications(env, token);
+  const submissionConfirmations = await runSubmissionConfirmations(env, token);
   return {
-    ok: reminders.ok && directNotifications.ok,
+    ok: reminders.ok && directNotifications.ok && submissionConfirmations.ok,
     startedAt,
     finishedAt: new Date().toISOString(),
     reminders,
     directNotifications,
+    submissionConfirmations,
   };
 }
 
@@ -390,7 +820,11 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/health")
-      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-reminders", "direct-notifications"] });
+      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-reminders", "direct-notifications", "submission-confirmations", "general-alerts"] });
+    if (url.pathname === "/general-alerts/unsubscribe" && request.method === "OPTIONS")
+      return publicJson(request, { ok: true });
+    if (url.pathname === "/general-alerts/unsubscribe" && request.method === "POST")
+      return unsubscribeFromGeneralAlerts(request, env);
     if (url.pathname === "/run" && request.headers.get("authorization") === `Bearer ${env.RUN_SECRET}`)
       return json(await runAutomation(env));
     return json({ ok: false, error: "Not found" }, 404);
