@@ -2,7 +2,7 @@
 
 Este serviço executa integralmente online e não depende do site aberto, do Codex,
 do Windows ou do computador do administrador. O Worker da Cloudflare é o relógio
-principal e verifica a cada minuto:
+principal e verifica a cada minuto, sempre com consultas filtradas e limitadas:
 
 - lembretes de sessão de 18 e 5 horas;
 - notificações privadas criadas por mestres no site, incluindo botões com emoji
@@ -27,6 +27,12 @@ segredos necessários e roda apenas como contingência horária ou manual.
 O intervalo de um minuto permite que a confirmação seja entregue normalmente
 entre um e dois minutos após o envio. Uma indisponibilidade geral do provedor
 continua sendo uma exceção possível, como em qualquer serviço externo.
+
+As filas não são varridas por inteiro. Notificações diretas e confirmações são
+consultadas somente nos estados pendente ou em processamento, em lotes limitados.
+Os lembretes consultam separadamente apenas os horários já vencidos e também usam
+um teto por estágio. A antiga tarefa agendada do Windows não faz parte da entrega
+online e deve permanecer desativada.
 
 ## Preferências dos alertas gerais
 

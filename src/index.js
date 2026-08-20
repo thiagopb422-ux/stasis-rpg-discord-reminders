@@ -9,6 +9,8 @@ const DIRECT_MESSAGE_ARTWORK = "https://i.pinimg.com/originals/cd/f7/29/cdf729fc
 const SUBMISSION_CONFIRMATION_ARTWORK = "https://i.pinimg.com/originals/b2/4a/14/b24a14cd5109ef90223cfda09389c6e6.gif";
 const SUBMISSION_CONFIRMATION_DELAY_MS = 60 * 1000;
 const MAX_DIRECT_NOTIFICATIONS_PER_RUN = 50;
+const MAX_SUBMISSION_CONFIRMATIONS_PER_RUN = 20;
+const MAX_DUE_REMINDERS_PER_STAGE = 25;
 
 const REMINDER_DEFINITIONS = [
   { hours: 18, atField: "sessionReminder18At", sentAtField: "sessionReminder18SentAt", messageField: "sessionReminder18MessageId", claimField: "sessionReminder18ClaimedAt" },
@@ -85,7 +87,7 @@ async function listCollection(env, token, name) {
   return items;
 }
 
-async function listCollectionEqual(env, token, name, field, value) {
+async function listCollectionEqual(env, token, name, field, value, limit = 50) {
   const response = await fetch(`${firestoreRoot(env)}:runQuery`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -93,10 +95,35 @@ async function listCollectionEqual(env, token, name, field, value) {
       structuredQuery: {
         from: [{ collectionId: name }],
         where: { fieldFilter: { field: { fieldPath: field }, op: "EQUAL", value: encodeValue(value) } },
+        limit: Math.max(1, Math.min(100, Number(limit) || 50)),
       },
     }),
   });
   if (!response.ok) throw new Error(`${name} (${field}=${value}): ${response.status} ${await response.text()}`);
+  const rows = await response.json();
+  return rows.flatMap((row) => row.document ? [decodeDocument(row.document)] : []);
+}
+
+async function listCollectionDue(env, token, name, field, now, limit = MAX_DUE_REMINDERS_PER_STAGE) {
+  const response = await fetch(`${firestoreRoot(env)}:runQuery`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: name }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: field },
+            op: "LESS_THAN_OR_EQUAL",
+            value: encodeValue(now),
+          },
+        },
+        orderBy: [{ field: { fieldPath: field }, direction: "DESCENDING" }],
+        limit: Math.max(1, Math.min(100, Number(limit) || MAX_DUE_REMINDERS_PER_STAGE)),
+      },
+    }),
+  });
+  if (!response.ok) throw new Error(`${name} (${field}<=${now}): ${response.status} ${await response.text()}`);
   const rows = await response.json();
   return rows.flatMap((row) => row.document ? [decodeDocument(row.document)] : []);
 }
@@ -300,7 +327,18 @@ function reminderIsDue(book, definition, now) {
 export async function runReminders(env, token = null) {
   const startedAt = new Date().toISOString();
   const firebaseToken = token || await firebaseAccessToken(env);
-  const books = await listCollection(env, firebaseToken, "masterBooks");
+  const dueGroups = await Promise.all(
+    REMINDER_DEFINITIONS.map((definition) =>
+      listCollectionDue(
+        env,
+        firebaseToken,
+        "masterBooks",
+        definition.atField,
+        startedAt,
+      ),
+    ),
+  );
+  const books = [...new Map(dueGroups.flat().map((book) => [book.id, book])).values()];
   const now = Date.now();
   let sent = 0;
   const errors = [];
@@ -547,8 +585,8 @@ export async function sendSubmissionConfirmation(env, channelId, confirmation, c
 async function runDirectNotifications(env, token) {
   const startedAt = new Date().toISOString();
   const groups = await Promise.all([
-    listCollectionEqual(env, token, "discordDirectNotifications", "status", "pending"),
-    listCollectionEqual(env, token, "discordDirectNotifications", "status", "processing"),
+    listCollectionEqual(env, token, "discordDirectNotifications", "status", "pending", MAX_DIRECT_NOTIFICATIONS_PER_RUN),
+    listCollectionEqual(env, token, "discordDirectNotifications", "status", "processing", MAX_DIRECT_NOTIFICATIONS_PER_RUN),
   ]);
   const retryBefore = Date.now() - CLAIM_TTL_MS;
   const eligibleNotifications = groups.flat().filter((item) => item.status === "pending" || (
@@ -629,16 +667,17 @@ async function runDirectNotifications(env, token) {
 async function runSubmissionConfirmations(env, token) {
   const startedAt = new Date().toISOString();
   const groups = await Promise.all([
-    listCollectionEqual(env, token, "discordSubmissionConfirmations", "status", "pending"),
-    listCollectionEqual(env, token, "discordSubmissionConfirmations", "status", "processing"),
+    listCollectionEqual(env, token, "discordSubmissionConfirmations", "status", "pending", MAX_SUBMISSION_CONFIRMATIONS_PER_RUN),
+    listCollectionEqual(env, token, "discordSubmissionConfirmations", "status", "processing", MAX_SUBMISSION_CONFIRMATIONS_PER_RUN),
   ]);
   const now = Date.now();
   const retryBefore = now - CLAIM_TTL_MS;
-  const confirmations = groups.flat().filter((item) => (
+  const eligibleConfirmations = groups.flat().filter((item) => (
     item.status === "pending"
       ? new Date(item.createdAt || 0).getTime() + SUBMISSION_CONFIRMATION_DELAY_MS <= now
       : item.status === "processing" && new Date(item.claimedAt || 0).getTime() < retryBefore
   )).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  const confirmations = eligibleConfirmations.slice(0, MAX_SUBMISSION_CONFIRMATIONS_PER_RUN);
   let sent = 0;
   let failed = 0;
   const deliveryFailures = [];
@@ -698,6 +737,7 @@ async function runSubmissionConfirmations(env, token) {
     finishedAt: new Date().toISOString(),
     inspected: groups.flat().length,
     eligible: confirmations.length,
+    remaining: Math.max(0, eligibleConfirmations.length - confirmations.length),
     sent,
     failed,
     deliveryFailures,

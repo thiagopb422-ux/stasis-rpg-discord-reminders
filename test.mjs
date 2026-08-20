@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {
   directNotificationPayload,
   resolveButtonEmoji,
+  runReminders,
   sendSubmissionConfirmation,
   submissionConfirmationAttachment,
   submissionConfirmationPayload,
@@ -101,6 +102,32 @@ const longStory = 'Capítulo sem cortes. '.repeat(600)
 const longAttachment = submissionConfirmationAttachment({ ...confirmation, story: longStory }, 'protocolo-longo')
 assert.equal(longAttachment.includes(longStory.trim()), true)
 assert.equal(JSON.stringify(submissionConfirmationPayload({ ...confirmation, story: longStory })).includes(longStory), false)
+
+const reminderQueries = []
+const fetchBeforeReminderTest = globalThis.fetch
+globalThis.fetch = async (url, init) => {
+  assert.equal(String(url).endsWith('/documents:runQuery'), true)
+  const query = JSON.parse(init.body).structuredQuery
+  reminderQueries.push(query)
+  return new Response(JSON.stringify([]), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+try {
+  const reminderResult = await runReminders({ FIREBASE_PROJECT_ID: 'stasisrpg' }, 'token-de-teste')
+  assert.equal(reminderResult.ok, true)
+  assert.equal(reminderResult.books, 0)
+  assert.equal(reminderQueries.length, 2)
+  assert.deepEqual(reminderQueries.map((query) => query.where.fieldFilter.op), [
+    'LESS_THAN_OR_EQUAL',
+    'LESS_THAN_OR_EQUAL',
+  ])
+  assert.deepEqual(reminderQueries.map((query) => query.limit), [25, 25])
+  assert.equal(reminderQueries.every((query) => query.orderBy[0].direction === 'DESCENDING'), true)
+} finally {
+  globalThis.fetch = fetchBeforeReminderTest
+}
 
 const originalFetch = globalThis.fetch
 const sentRequests = []
