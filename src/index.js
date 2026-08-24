@@ -11,6 +11,7 @@ const SUBMISSION_CONFIRMATION_DELAY_MS = 60 * 1000;
 const MAX_DIRECT_NOTIFICATIONS_PER_RUN = 50;
 const MAX_SUBMISSION_CONFIRMATIONS_PER_RUN = 20;
 const MAX_DUE_REMINDERS_PER_STAGE = 25;
+const MAX_OPEN_SESSION_POLLS_PER_RUN = 25;
 
 const REMINDER_DEFINITIONS = [
   { hours: 18, atField: "sessionReminder18At", sentAtField: "sessionReminder18SentAt", messageField: "sessionReminder18MessageId", claimField: "sessionReminder18ClaimedAt" },
@@ -291,6 +292,171 @@ function googleCalendarUrl(book, env) {
     ctz: env.TIME_ZONE || DEFAULT_TIME_ZONE,
   });
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+export function resolveSessionPollResult(poll, votes) {
+  const options = Array.isArray(poll?.options) ? poll.options : [];
+  const validOptionIds = new Set(options.map((option) => String(option?.id || "")));
+  const tally = new Map(options.map((option) => [String(option.id), 0]));
+  for (const vote of Array.isArray(votes) ? votes : []) {
+    const uniqueSelections = new Set(Array.isArray(vote?.optionIds) ? vote.optionIds : []);
+    for (const optionId of uniqueSelections) {
+      if (validOptionIds.has(String(optionId)))
+        tally.set(String(optionId), (tally.get(String(optionId)) || 0) + 1);
+    }
+  }
+  const voteCount = Array.isArray(votes) ? votes.length : 0;
+  const highestVotes = Math.max(0, ...tally.values());
+  const winningOptions = highestVotes > 0
+    ? options.filter((option) => tally.get(String(option.id)) === highestVotes)
+    : [];
+  const targetVotes = Math.max(1, Number(poll?.targetVotes) || 1);
+  const targetMet = voteCount >= targetVotes;
+  const expiresAt = new Date(poll?.expiresAt || 0).getTime();
+  const expired = Number.isFinite(expiresAt) && Date.now() >= expiresAt;
+  return {
+    tally: Object.fromEntries(tally),
+    voteCount,
+    highestVotes,
+    winningOptions,
+    winnerOptionIds: winningOptions.map((option) => String(option.id)),
+    targetVotes,
+    targetMet,
+    expired,
+    shouldClose: targetMet || expired,
+    kind: winningOptions.length > 1 ? "tie" : winningOptions.length === 1 ? "winner" : "empty",
+  };
+}
+
+export function sessionPollResultPayload(poll, result, env, calendarUrl = "") {
+  const complete = result.targetMet;
+  const tie = result.kind === "tie";
+  const outcome = result.winningOptions.map((option) =>
+    `${tie ? "⚖️" : "🏆"} **${safe(option.label || "Data sugerida", 180)}**\n${safe(sessionLabel(option.startsAt, env.TIME_ZONE), 300)}`,
+  ).join("\n\n");
+  const description = result.kind === "empty"
+    ? "A consulta foi encerrada sem respostas registradas."
+    : tie
+      ? `A votação terminou **empatada**, e todas as escolhas vencedoras seguem abaixo.\n\n${outcome}`
+      : `${complete ? "Todos responderam e a data escolhida foi:" : "O prazo terminou e a opção mais votada foi:"}\n\n${outcome}`;
+  return {
+    content: "||@here||",
+    allowed_mentions: { parse: ["everyone"] },
+    embeds: [{
+      color: tie ? 0x9d6aba : result.kind === "empty" ? 0x6f7680 : 0xd3a64a,
+      title: `${DRAGON_EMOJI} ${safe(poll.title || "Resultado da votação", 220)}`,
+      description,
+      fields: [
+        { name: "Trama", value: safe(poll.tramaTitle || "Stasis RPG", 256), inline: true },
+        { name: "Participação", value: `${result.voteCount} de ${result.targetVotes} resposta${result.targetVotes === 1 ? "" : "s"}`, inline: true },
+        ...(tie ? [{ name: "Votos por opção empatada", value: String(result.highestVotes), inline: true }] : []),
+      ],
+      ...(/^https?:\/\//i.test(String(poll.image || "")) ? { image: { url: poll.image } } : {}),
+      footer: { text: tie ? "Stasis RPG · Empate na agenda" : "Stasis RPG · Resultado da agenda" },
+      timestamp: new Date().toISOString(),
+    }],
+    ...(calendarUrl && complete && result.kind === "winner" ? {
+      components: [{ type: 1, components: [{
+        type: 2,
+        style: 5,
+        label: "Adicionar ao Google Agenda",
+        url: calendarUrl,
+        emoji: { id: "1124393908441464873", name: "dragao" },
+      }] }],
+    } : {}),
+    nonce: `${String(poll.id || "agenda").replace(/[^A-Za-z0-9]/g, "").slice(0, 20)}vote`,
+    enforce_nonce: true,
+  };
+}
+
+export async function runSessionPolls(env, token = null) {
+  const startedAt = new Date().toISOString();
+  const firebaseToken = token || await firebaseAccessToken(env);
+  const polls = await listCollectionEqual(env, firebaseToken, "sessionPolls", "status", "open", MAX_OPEN_SESSION_POLLS_PER_RUN);
+  let closed = 0;
+  let sent = 0;
+  const errors = [];
+  for (const poll of polls) {
+    const claimedAtMs = new Date(poll.resultClaimedAt || 0).getTime();
+    if (Number.isFinite(claimedAtMs) && Date.now() - claimedAtMs < CLAIM_TTL_MS) continue;
+    let claimed;
+    try {
+      const votes = await listCollectionEqual(
+        env,
+        firebaseToken,
+        "sessionPollVotes",
+        "pollId",
+        poll.id,
+        Math.max(1, Math.min(100, Number(poll.targetVotes) || 1)),
+      );
+      const result = resolveSessionPollResult(poll, votes);
+      if (!result.shouldClose) continue;
+      const claimTime = new Date().toISOString();
+      claimed = await patchDocument(env, firebaseToken, "sessionPolls", poll.id, {
+        resultClaimedAt: claimTime,
+        resultWorkerLastRunAt: claimTime,
+        resultWorkerLastError: "",
+      }, poll._updateTime);
+
+      const uniqueWinner = result.targetMet && result.kind === "winner" ? result.winningOptions[0] : null;
+      let calendarUrl = "";
+      if (uniqueWinner && poll.bookId) {
+        const book = await getDocument(env, firebaseToken, "masterBooks", poll.bookId);
+        if (book) {
+          const winnerTime = new Date(uniqueWinner.startsAt).getTime();
+          const updatedAt = new Date().toISOString();
+          const bookPatch = {
+            nextSessionAt: uniqueWinner.startsAt,
+            nextSessionTitle: poll.title || `Sessão de ${poll.tramaTitle || "Stasis RPG"}`,
+            nextSessionDiscordChannelId: poll.discordChannelId || "",
+            nextSessionImage: poll.image || "",
+            nextSessionPollId: poll.id,
+            sessionReminder18At: new Date(winnerTime - 18 * 60 * 60 * 1000).toISOString(),
+            sessionReminder18SentAt: "",
+            sessionReminder18MessageId: "",
+            sessionReminder5At: new Date(winnerTime - 5 * 60 * 60 * 1000).toISOString(),
+            sessionReminder5SentAt: "",
+            sessionReminder5MessageId: "",
+            updatedAt,
+          };
+          await patchDocument(env, firebaseToken, "masterBooks", book.id, bookPatch, book._updateTime);
+          calendarUrl = googleCalendarUrl({ ...book, ...bookPatch }, env);
+        }
+      }
+
+      let message = null;
+      if (poll.discordChannelId) {
+        message = await sendDiscord(env, poll.discordChannelId, sessionPollResultPayload(poll, result, env, calendarUrl));
+        sent += 1;
+      }
+      const closedAt = new Date().toISOString();
+      await patchDocument(env, firebaseToken, "sessionPolls", poll.id, {
+        status: "closed",
+        voteCount: result.voteCount,
+        winnerOptionIds: result.winnerOptionIds,
+        winnerStartsAt: uniqueWinner?.startsAt || "",
+        winnerLabel: uniqueWinner?.label || (result.kind === "tie" ? `Empate entre ${result.winningOptions.length} opções` : ""),
+        resultKind: result.kind,
+        resultTargetMet: result.targetMet,
+        resultMessageId: message?.id || "",
+        resultSentAt: message ? closedAt : "",
+        resultClaimedAt: "",
+        resultWorkerLastRunAt: closedAt,
+        resultWorkerLastSuccessAt: closedAt,
+        closedAt,
+      }, claimed._updateTime);
+      closed += 1;
+    } catch (error) {
+      const message = String(error?.message || error).slice(0, 900);
+      errors.push({ pollId: poll.id, error: message });
+      await patchDocument(env, firebaseToken, "sessionPolls", poll.id, {
+        resultClaimedAt: "",
+        resultWorkerLastRunAt: new Date().toISOString(),
+        resultWorkerLastError: message,
+      }).catch(() => {});
+    }
+  }
+  return { ok: errors.length === 0, startedAt, finishedAt: new Date().toISOString(), inspected: polls.length, closed, sent, errors };
 }
 
 function reminderPayload(book, hours, env) {
@@ -800,13 +966,15 @@ async function unsubscribeFromGeneralAlerts(request, env) {
 export async function runAutomation(env) {
   const startedAt = new Date().toISOString();
   const token = await firebaseAccessToken(env);
+  const sessionPolls = await runSessionPolls(env, token);
   const reminders = await runReminders(env, token);
   const directNotifications = await runDirectNotifications(env, token);
   const submissionConfirmations = await runSubmissionConfirmations(env, token);
   return {
-    ok: reminders.ok && directNotifications.ok && submissionConfirmations.ok,
+    ok: sessionPolls.ok && reminders.ok && directNotifications.ok && submissionConfirmations.ok,
     startedAt,
     finishedAt: new Date().toISOString(),
+    sessionPolls,
     reminders,
     directNotifications,
     submissionConfirmations,
@@ -820,7 +988,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/health")
-      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-reminders", "direct-notifications", "submission-confirmations", "general-alerts"] });
+      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-polls", "session-reminders", "direct-notifications", "submission-confirmations", "general-alerts"] });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "OPTIONS")
       return publicJson(request, { ok: true });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "POST")

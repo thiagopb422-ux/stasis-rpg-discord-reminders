@@ -1,13 +1,55 @@
 import assert from 'node:assert/strict'
 import {
   directNotificationPayload,
+  resolveSessionPollResult,
   resolveButtonEmoji,
   runReminders,
+  sessionPollResultPayload,
   sendSubmissionConfirmation,
   submissionConfirmationAttachment,
   submissionConfirmationPayload,
   submissionConfirmationPortraitFile,
 } from './src/index.js'
+
+const poll = {
+  id: 'poll-agenda-teste',
+  title: 'Próxima jornada',
+  tramaTitle: 'Begins',
+  targetVotes: 4,
+  expiresAt: '2099-08-24T23:59:00.000Z',
+  options: [
+    { id: 'segunda', label: 'Segunda à noite', startsAt: '2026-08-24T23:00:00.000Z' },
+    { id: 'terca', label: 'Terça à noite', startsAt: '2026-08-25T23:00:00.000Z' },
+    { id: 'quarta', label: 'Quarta à noite', startsAt: '2026-08-26T23:00:00.000Z' },
+  ],
+}
+const tiedResult = resolveSessionPollResult(poll, [
+  { optionIds: ['segunda'] },
+  { optionIds: ['terca'] },
+  { optionIds: ['segunda'] },
+  { optionIds: ['terca'] },
+])
+assert.equal(tiedResult.shouldClose, true)
+assert.equal(tiedResult.targetMet, true)
+assert.equal(tiedResult.kind, 'tie')
+assert.deepEqual(tiedResult.winnerOptionIds, ['segunda', 'terca'])
+const tiedPayload = sessionPollResultPayload(poll, tiedResult, { TIME_ZONE: 'America/Sao_Paulo' })
+assert.equal(tiedPayload.embeds[0].description.includes('empatada'), true)
+assert.equal(tiedPayload.embeds[0].description.includes('Segunda à noite'), true)
+assert.equal(tiedPayload.embeds[0].description.includes('Terça à noite'), true)
+assert.equal(tiedPayload.components, undefined)
+
+const singleVoterResult = resolveSessionPollResult({ ...poll, targetVotes: 1 }, [{ optionIds: ['quarta'] }])
+assert.equal(singleVoterResult.shouldClose, true)
+assert.equal(singleVoterResult.kind, 'winner')
+assert.deepEqual(singleVoterResult.winnerOptionIds, ['quarta'])
+const singleVoterPayload = sessionPollResultPayload(
+  { ...poll, targetVotes: 1 },
+  singleVoterResult,
+  { TIME_ZONE: 'America/Sao_Paulo' },
+  'https://calendar.google.com/calendar/render?action=TEMPLATE',
+)
+assert.equal(singleVoterPayload.components[0].components[0].label, 'Adicionar ao Google Agenda')
 
 const guildEmojis = [
   { id: '1537217597077200997', name: 'd20', animated: false },

@@ -5,6 +5,8 @@ do Windows ou do computador do administrador. O Worker da Cloudflare é o relóg
 principal e verifica a cada minuto, sempre com consultas filtradas e limitadas:
 
 - lembretes de sessão de 18 e 5 horas;
+- encerramento das votações de agenda assim que todos os jogadores esperados
+  respondem, incluindo resultados empatados, ou quando o prazo termina;
 - notificações privadas criadas por mestres no site, incluindo botões com emoji
   e uma imagem ou GIF de decoração opcional.
 - confirmações automáticas de fichas, enviadas após a espera mínima de um minuto,
@@ -31,7 +33,8 @@ continua sendo uma exceção possível, como em qualquer serviço externo.
 As filas não são varridas por inteiro. Notificações diretas e confirmações são
 consultadas somente nos estados pendente ou em processamento, em lotes limitados.
 Os lembretes consultam separadamente apenas os horários já vencidos e também usam
-um teto por estágio. A antiga tarefa agendada do Windows não faz parte da entrega
+um teto por estágio. As agendas consultam somente votações abertas, no máximo 25
+por execução, e leem apenas os votos vinculados a cada votação. A antiga tarefa agendada do Windows não faz parte da entrega
 online e deve permanecer desativada.
 
 ## Preferências dos alertas gerais
