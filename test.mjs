@@ -38,6 +38,17 @@ assert.equal(parseDiceNotation('d8').sides, 8)
 assert.equal(parseDiceNotation('D8').sides, 8)
 assert.equal(parseDiceNotation('/r d8@Agilidade').sides, 8)
 assert.equal(parseDiceNotation('**d8**').sides, 8)
+const mixedParsedDice = parseDiceNotation('3d20 + 1d8@Ataque combinado')
+assert.deepEqual(mixedParsedDice, {
+  groups: [
+    { quantity: 3, sides: 20 },
+    { quantity: 1, sides: 8 },
+  ],
+  modifier: 0,
+  title: 'Ataque combinado',
+})
+assert.throws(() => parseDiceNotation('3d20+2d8'), /quatro dados/i)
+assert.throws(() => parseDiceNotation('d20-1d8'), /quatro dados/i)
 
 const deterministicRoll = rollDice(parsedDice, (() => {
   const values = [4, 6]
@@ -45,6 +56,24 @@ const deterministicRoll = rollDice(parsedDice, (() => {
 })())
 assert.deepEqual(deterministicRoll.rolls, [4, 6])
 assert.equal(deterministicRoll.total, 13)
+const mixedRoll = rollDice(mixedParsedDice, (() => {
+  const values = [11, 12, 13, 5]
+  return () => values.shift()
+})())
+assert.deepEqual(mixedRoll.rolls, [11, 12, 13, 5])
+assert.deepEqual(mixedRoll.diceRolls, [
+  { sides: 20, value: 11 },
+  { sides: 20, value: 12 },
+  { sides: 20, value: 13 },
+  { sides: 8, value: 5 },
+])
+assert.equal(mixedRoll.total, 41)
+assert.deepEqual(diceImagePieces(mixedRoll), [
+  { die: 'd20', face: 11 },
+  { die: 'd20', face: 12 },
+  { die: 'd20', face: 13 },
+  { die: 'd8', face: 5 },
+])
 assert.deepEqual(diceImagePieces({ sides: 100, rolls: [37] }), [
   { die: 'd100', face: 3 },
   { die: 'd10', face: 7 },
@@ -122,6 +151,18 @@ const modifiedInteraction = await diceInteractionPayload({
 assert.equal(modifiedInteraction.embeds[0].footer.text, 'Dados: 11 + 5')
 assert.deepEqual(modifiedInteraction.embeds[0].fields, [
   { name: 'TOTAL', value: '**16**', inline: true },
+])
+
+const mixedInteraction = await diceInteractionPayload({
+  data: { options: [{ name: 'rolagem', value: '3d20 + 1d8' }] },
+}, 'https://dice.stasis.test', diceImageSecret, (() => {
+  const values = [11, 12, 13, 5]
+  return () => values.shift()
+})())
+assert.equal(mixedInteraction.embeds[0].description, '**3D20+D8**')
+assert.equal(mixedInteraction.embeds[0].footer.text, 'Dados: 11 + 12 + 13 + 5')
+assert.deepEqual(mixedInteraction.embeds[0].fields, [
+  { name: 'TOTAL', value: '**41**', inline: true },
 ])
 
 const blueInteraction = await diceInteractionPayload({

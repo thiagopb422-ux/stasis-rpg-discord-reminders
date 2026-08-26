@@ -22,7 +22,7 @@ function safeText(value, max = 100) {
 }
 
 function notationError() {
-  return new Error("As runas não reconheceram essa rolagem. Use `d20`, `2d6` ou `d8+3`; acrescente um título opcional depois de `@`.");
+  return new Error("As runas não reconheceram essa rolagem. Use `d20`, `2d6`, `d8+3` ou misture até quatro dados como `3d20+1d8`; acrescente um título opcional depois de `@`.");
 }
 
 export function parseDiceNotation(value) {
@@ -35,16 +35,33 @@ export function parseDiceNotation(value) {
   const titleSeparator = input.indexOf("@");
   const expression = (titleSeparator >= 0 ? input.slice(0, titleSeparator) : input).trim();
   const title = safeText(titleSeparator >= 0 ? input.slice(titleSeparator + 1) : "", 80);
-  const match = expression.match(/^(\d{0,2})\s*d\s*(100|20|12|10|8|6|4)\s*([+-]\s*\d{1,3})?$/i);
-  if (!match) throw notationError();
-
-  const quantity = match[1] ? Number(match[1]) : 1;
-  const sides = Number(match[2]);
-  const modifier = match[3] ? Number(match[3].replace(/\s/g, "")) : 0;
-  if (!SUPPORTED_DICE.has(sides) || quantity < 1 || quantity > MAX_DICE_PER_ROLL || (sides === 100 && quantity > 2) || Math.abs(modifier) > 999)
+  const compact = expression.replace(/\s/g, "").toLowerCase();
+  const tokens = compact.match(/[+-]?[^+-]+/g);
+  if (!tokens || tokens.join("") !== compact || !/^\d{0,2}d/.test(tokens[0]))
     throw notationError();
 
-  return { quantity, sides, modifier, title };
+  const grouped = new Map();
+  let modifier = 0;
+  for (const token of tokens) {
+    const dice = token.match(/^\+?(\d{0,2})d(100|20|12|10|8|6|4)$/);
+    if (dice) {
+      const quantity = dice[1] ? Number(dice[1]) : 1;
+      const sides = Number(dice[2]);
+      if (!SUPPORTED_DICE.has(sides) || quantity < 1) throw notationError();
+      grouped.set(sides, (grouped.get(sides) || 0) + quantity);
+      continue;
+    }
+    if (!/^[+-]\d{1,3}$/.test(token)) throw notationError();
+    modifier += Number(token);
+  }
+  const groups = Array.from(grouped, ([sides, quantity]) => ({ quantity, sides }));
+  const quantity = groups.reduce((sum, group) => sum + group.quantity, 0);
+  const d100Quantity = groups.find((group) => group.sides === 100)?.quantity || 0;
+  if (!groups.length || quantity > MAX_DICE_PER_ROLL || d100Quantity > 2 || Math.abs(modifier) > 999)
+    throw notationError();
+  if (groups.length === 1)
+    return { quantity: groups[0].quantity, sides: groups[0].sides, modifier, title };
+  return { groups, modifier, title };
 }
 
 function secureDie(sides) {
@@ -56,14 +73,25 @@ function secureDie(sides) {
 }
 
 export function rollDice(parsed, die = secureDie) {
-  const rolls = Array.from({ length: parsed.quantity }, () => die(parsed.sides));
+  const groups = parsed.groups || [{ quantity: parsed.quantity, sides: parsed.sides }];
+  const diceRolls = groups.flatMap((group) =>
+    Array.from({ length: group.quantity }, () => ({
+      sides: group.sides,
+      value: die(group.sides),
+    })),
+  );
+  const rolls = diceRolls.map((roll) => roll.value);
   const diceTotal = rolls.reduce((sum, value) => sum + value, 0);
-  return { ...parsed, rolls, diceTotal, total: diceTotal + parsed.modifier };
+  return { ...parsed, groups, diceRolls, rolls, diceTotal, total: diceTotal + parsed.modifier };
 }
 
 export function diceImagePieces(result) {
-  return result.rolls.flatMap((value) => {
-    if (result.sides !== 100) return [{ die: `d${result.sides}`, face: value }];
+  const diceRolls = result.diceRolls || result.rolls.map((value) => ({
+    sides: result.sides,
+    value,
+  }));
+  return diceRolls.flatMap(({ sides, value }) => {
+    if (sides !== 100) return [{ die: `d${sides}`, face: value }];
     let tens = Math.floor(value / 10);
     let ones = value - (tens * 10);
     if (tens === 0) tens = 10;
@@ -104,7 +132,7 @@ async function hmac(secret, value) {
 export async function createDiceImagePath(pieces, secret, style = "cosmic") {
   if (!secret) throw new Error("A chave das imagens de dados não está configurada.");
   const payload = bytesToBase64Url(textEncoder.encode(JSON.stringify({
-    version: 3,
+    version: 4,
     style: normalizeDiceStyle(style),
     pieces,
   })));
@@ -137,7 +165,7 @@ export async function readSignedDiceImagePath(pathname, secret) {
   if (!constantTimeEqual(expected, match[2])) return null;
   try {
     const data = JSON.parse(new TextDecoder().decode(base64UrlToBytes(match[1])));
-    if (![1, 2, 3].includes(data?.version) || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
+    if (![1, 2, 3, 4].includes(data?.version) || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
       return null;
     if (!data.pieces.every(validPiece)) return null;
     return {
@@ -275,7 +303,11 @@ export async function renderDiceImage(request, env) {
 
 function canonicalNotation(result) {
   const modifier = result.modifier ? `${result.modifier > 0 ? "+" : ""}${result.modifier}` : "";
-  return `${result.quantity > 1 ? result.quantity : ""}D${result.sides}${modifier}`;
+  const groups = result.groups || [{ quantity: result.quantity, sides: result.sides }];
+  const dice = groups
+    .map((group) => `${group.quantity > 1 ? group.quantity : ""}D${group.sides}`)
+    .join("+");
+  return `${dice}${modifier}`;
 }
 
 function resultFooter(result) {
@@ -290,8 +322,8 @@ export async function diceInteractionPayload(interaction, origin, secret, die = 
   const parsed = parseDiceNotation(option?.value);
   const result = rollDice(parsed, die);
   const imagePath = await createDiceImagePath(diceImagePieces(result), secret, style);
-  const naturalCritical = result.quantity === 1 && result.sides === 20 && result.rolls[0] === 20;
-  const naturalFailure = result.quantity === 1 && result.sides === 20 && result.rolls[0] === 1;
+  const naturalCritical = result.diceRolls.length === 1 && result.diceRolls[0].sides === 20 && result.rolls[0] === 20;
+  const naturalFailure = result.diceRolls.length === 1 && result.diceRolls[0].sides === 20 && result.rolls[0] === 1;
   const label = result.title || "Rolagem de Dados";
   const showTotalField = Boolean(result.modifier) || result.rolls.length > 1;
   const title = naturalCritical
@@ -365,7 +397,7 @@ export const DICE_COMMAND_DEFINITION = {
   description: "Role os dados do Stasis RPG",
   options: [{
     name: "rolagem",
-    description: "D4, D6, D8, D10, D12, D20 ou D100. Ex.: d8@Agilidade",
+    description: "Misture até 4 dados. Ex.: 3d20+1d8 ou d20+5@Percepção",
     type: 3,
     required: true,
     min_length: 2,
