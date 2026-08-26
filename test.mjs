@@ -31,6 +31,10 @@ assert.deepEqual(parsedDice, {
 })
 assert.throws(() => parseDiceNotation('9d20@Excesso'), /runas não reconheceram/i)
 assert.throws(() => parseDiceNotation('d7@Dado impossível'), /runas não reconheceram/i)
+assert.equal(parseDiceNotation('d8').sides, 8)
+assert.equal(parseDiceNotation('D8').sides, 8)
+assert.equal(parseDiceNotation('/r d8@Agilidade').sides, 8)
+assert.equal(parseDiceNotation('**d8**').sides, 8)
 
 const deterministicRoll = rollDice(parsedDice, (() => {
   const values = [4, 6]

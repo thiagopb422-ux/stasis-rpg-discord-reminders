@@ -263,6 +263,9 @@ async function setupDiscordDice(request, env) {
     { die: "d20", face: 20 },
     { die: "d6", face: 4 },
   ], env.DICE_IMAGE_SECRET)}`;
+  const previewD8ImageUrl = `${origin}${await createDiceImagePath([
+    { die: "d8", face: 8 },
+  ], env.DICE_IMAGE_SECRET)}`;
   return json({
     ok: true,
     applicationId: application.id,
@@ -271,6 +274,7 @@ async function setupDiscordDice(request, env) {
     guildId,
     endpointUrl,
     previewImageUrl,
+    previewD8ImageUrl,
     command: { id: command.id, name: command.name, description: command.description },
   });
 }

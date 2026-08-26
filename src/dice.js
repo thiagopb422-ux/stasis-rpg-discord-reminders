@@ -19,7 +19,12 @@ function notationError() {
 }
 
 export function parseDiceNotation(value) {
-  const input = String(value || "").trim();
+  const input = String(value || "")
+    .trim()
+    .replace(/^\/r\s+/i, "")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .trim();
   const titleSeparator = input.indexOf("@");
   const expression = (titleSeparator >= 0 ? input.slice(0, titleSeparator) : input).trim();
   const title = safeText(titleSeparator >= 0 ? input.slice(titleSeparator + 1) : "", 80);
@@ -313,7 +318,7 @@ export const DICE_COMMAND_DEFINITION = {
   description: "Role os dados do Stasis RPG",
   options: [{
     name: "rolagem",
-    description: "Ex.: d20@Percepção, 2d6@Dano ou d8+3@Agilidade",
+    description: "D4, D6, D8, D10, D12, D20 ou D100. Ex.: d8@Agilidade",
     type: 3,
     required: true,
     min_length: 2,
