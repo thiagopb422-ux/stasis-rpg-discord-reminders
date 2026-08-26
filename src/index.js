@@ -1,3 +1,12 @@
+import {
+  DICE_COMMAND_DEFINITION,
+  createDiceImagePath,
+  diceInteractionError,
+  diceInteractionPayload,
+  renderDiceImage,
+  verifyDiscordInteraction,
+} from "./dice.js";
+
 const DISCORD_API = "https://discord.com/api/v10";
 const DEFAULT_PROJECT = "stasisrpg";
 const DEFAULT_TIME_ZONE = "America/Sao_Paulo";
@@ -195,6 +204,75 @@ async function discordMaybe(env, path, init = {}) {
 
 async function sendDiscord(env, channelId, payload) {
   return discord(env, `/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+async function discordApplication(env) {
+  return discord(env, "/applications/@me");
+}
+
+async function handleDiscordInteraction(request, env) {
+  const rawBody = await request.text();
+  let publicKey = String(env.DISCORD_PUBLIC_KEY || "").trim();
+  if (!publicKey) publicKey = String((await discordApplication(env)).verify_key || "");
+  const verified = await verifyDiscordInteraction(
+    rawBody,
+    request.headers.get("x-signature-ed25519"),
+    request.headers.get("x-signature-timestamp"),
+    publicKey,
+  );
+  if (!verified) return json({ ok: false, error: "Invalid request signature" }, 401);
+
+  let interaction;
+  try {
+    interaction = JSON.parse(rawBody);
+  } catch {
+    return json({ ok: false, error: "Invalid interaction payload" }, 400);
+  }
+  if (interaction.type === 1) return json({ type: 1 });
+  if (interaction.type !== 2 || interaction.data?.name !== "r")
+    return json(diceInteractionError(new Error("Este comando ainda não pertence ao grimório do Stasis.")));
+
+  try {
+    const data = await diceInteractionPayload(
+      interaction,
+      new URL(request.url).origin,
+      env.DICE_IMAGE_SECRET,
+    );
+    return json({ type: 4, data });
+  } catch (error) {
+    return json(diceInteractionError(error));
+  }
+}
+
+async function setupDiscordDice(request, env) {
+  if (!env.DICE_SETUP_SECRET || request.headers.get("authorization") !== `Bearer ${env.DICE_SETUP_SECRET}`)
+    return json({ ok: false, error: "Unauthorized" }, 401);
+  const application = await discordApplication(env);
+  const guildId = String(env.DISCORD_GUILD_ID || DEFAULT_GUILD_ID);
+  const origin = new URL(request.url).origin;
+  const endpointUrl = `${origin}/discord/interactions`;
+  await discord(env, "/applications/@me", {
+    method: "PATCH",
+    body: JSON.stringify({ interactions_endpoint_url: endpointUrl }),
+  });
+  const command = await discord(env, `/applications/${application.id}/guilds/${guildId}/commands`, {
+    method: "POST",
+    body: JSON.stringify(DICE_COMMAND_DEFINITION),
+  });
+  const previewImageUrl = `${origin}${await createDiceImagePath([
+    { die: "d20", face: 20 },
+    { die: "d6", face: 4 },
+  ], env.DICE_IMAGE_SECRET)}`;
+  return json({
+    ok: true,
+    applicationId: application.id,
+    applicationName: application.name,
+    publicKey: application.verify_key,
+    guildId,
+    endpointUrl,
+    previewImageUrl,
+    command: { id: command.id, name: command.name, description: command.description },
+  });
 }
 
 function publicJson(request, body, status = 200) {
@@ -987,8 +1065,14 @@ export default {
   },
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/dice/image/") && request.method === "GET")
+      return renderDiceImage(request, env);
+    if (url.pathname === "/discord/interactions" && request.method === "POST")
+      return handleDiscordInteraction(request, env);
+    if (url.pathname === "/discord/setup-dice" && request.method === "POST")
+      return setupDiscordDice(request, env);
     if (url.pathname === "/health")
-      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-polls", "session-reminders", "direct-notifications", "submission-confirmations", "general-alerts"] });
+      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-polls", "session-reminders", "direct-notifications", "submission-confirmations", "general-alerts", "visual-dice-command"] });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "OPTIONS")
       return publicJson(request, { ok: true });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "POST")

@@ -14,6 +14,8 @@ principal e verifica a cada minuto, sempre com consultas filtradas e limitadas:
   segunda mensagem com arquivo de texto anexado.
 - alertas gerais excepcionais, enviados em lotes seguros de até 50 DMs por minuto,
   com notícia vinculada e opção individual de desativar futuros comunicados.
+- comando visual `/r`, com D4, D6, D8, D10, D12, D20 e D100 em imagens 3D azuis
+  e brancas, título opcional após `@`, vários dados e modificador numérico.
 
 O código é público e mínimo. Tokens, senhas e outras credenciais permanecem nos
 segredos criptografados da Cloudflare. O GitHub Actions conserva uma cópia dos
@@ -52,9 +54,31 @@ O Worker confere a supressão outra vez imediatamente antes de cada DM.
 - `FIREBASE_SERVICE_EMAIL`
 - `FIREBASE_SERVICE_PASSWORD`
 - `SUBMISSION_CONFIRMATION_PRIVATE_KEY`
+- `DISCORD_PUBLIC_KEY`
+- `DICE_IMAGE_SECRET`
+- `DICE_SETUP_SECRET`
 
 Na Cloudflare também existe `RUN_SECRET`, usado somente pelo endpoint protegido
 de diagnóstico. Valores sensíveis nunca devem ser colocados no `wrangler.toml`.
+
+## Oráculo dos Dados
+
+O Discord encaminha o comando `/r` diretamente para
+`/discord/interactions`; cada requisição é validada pela assinatura Ed25519 da
+aplicação antes de qualquer rolagem. O comando aceita, por exemplo:
+
+- `d20@Lance de Percepção`
+- `2d6@Dano da Espada`
+- `d8+3@Teste de Agilidade`
+- `d100@Descoberta de Tesouro`
+
+São permitidos até quatro dados da mesma categoria por comando (ou dois D100). O resultado usa
+aleatoriedade criptográfica e gera uma URL curta assinada para a imagem. A rota
+de imagem combina os arquivos RGBA estáticos e entrega um PNG com cache
+imutável; ela não consulta o Firebase e não depende do cron.
+
+O conjunto visual `polyhedral_3d_blue_and_white` veio do DiscordDiceBot. Créditos
+e licença estão preservados em `THIRD_PARTY_LICENSES`.
 
 O usuário técnico `Stasis Reminder Service` possui acesso estritamente identificado
 nas regras do Firestore. Apenas ele pode mover notificações de `pending` para

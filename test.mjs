@@ -10,6 +10,88 @@ import {
   submissionConfirmationPayload,
   submissionConfirmationPortraitFile,
 } from './src/index.js'
+import {
+  composeDiceImage,
+  createDiceImagePath,
+  diceImagePieces,
+  diceInteractionPayload,
+  parseDiceNotation,
+  readSignedDiceImagePath,
+  renderDiceImage,
+  rollDice,
+  verifyDiscordInteraction,
+} from './src/dice.js'
+
+const parsedDice = parseDiceNotation('2d6+3@Dano da Espada')
+assert.deepEqual(parsedDice, {
+  quantity: 2,
+  sides: 6,
+  modifier: 3,
+  title: 'Dano da Espada',
+})
+assert.throws(() => parseDiceNotation('9d20@Excesso'), /runas não reconheceram/i)
+assert.throws(() => parseDiceNotation('d7@Dado impossível'), /runas não reconheceram/i)
+
+const deterministicRoll = rollDice(parsedDice, (() => {
+  const values = [4, 6]
+  return () => values.shift()
+})())
+assert.deepEqual(deterministicRoll.rolls, [4, 6])
+assert.equal(deterministicRoll.total, 13)
+assert.deepEqual(diceImagePieces({ sides: 100, rolls: [37] }), [
+  { die: 'd100', face: 3 },
+  { die: 'd10', face: 7 },
+])
+assert.deepEqual(diceImagePieces({ sides: 100, rolls: [100] }), [
+  { die: 'd100', face: 10 },
+  { die: 'd10', face: 10 },
+])
+
+const diceImageSecret = 'segredo-local-de-imagem'
+const dicePieces = [{ die: 'd20', face: 20 }, { die: 'd6', face: 4 }]
+const signedDicePath = await createDiceImagePath(dicePieces, diceImageSecret)
+assert.deepEqual(await readSignedDiceImagePath(signedDicePath, diceImageSecret), dicePieces)
+assert.equal(await readSignedDiceImagePath(signedDicePath.replace('.png', 'x.png'), diceImageSecret), null)
+
+const flatFace = (red, green, blue) => {
+  const face = new Uint8Array(100 * 100 * 4)
+  for (let index = 0; index < face.length; index += 4) face.set([red, green, blue, 255], index)
+  return face
+}
+const composedDice = await composeDiceImage(dicePieces, async (_piece, index) => index ? flatFace(0, 0, 255) : flatFace(255, 0, 0))
+assert.deepEqual(Array.from(composedDice.slice(0, 8)), [137, 80, 78, 71, 13, 10, 26, 10])
+assert.equal(new DataView(composedDice.buffer, composedDice.byteOffset).getUint32(16), 208)
+assert.equal(new DataView(composedDice.buffer, composedDice.byteOffset).getUint32(20), 100)
+
+const diceImageRequest = new Request(`https://dice.stasis.test${signedDicePath}`)
+const renderedDiceResponse = await renderDiceImage(diceImageRequest, {
+  DICE_IMAGE_SECRET: diceImageSecret,
+  ASSETS: { fetch: async () => new Response(flatFace(35, 73, 214)) },
+})
+assert.equal(renderedDiceResponse.status, 200)
+assert.equal(renderedDiceResponse.headers.get('content-type'), 'image/png')
+assert.equal((await renderedDiceResponse.arrayBuffer()).byteLength > 100, true)
+
+const criticalInteraction = await diceInteractionPayload({
+  data: { options: [{ name: 'rolagem', value: 'd20@Lance de Percepção' }] },
+  member: { nick: 'Aventureiro', user: { username: 'jogador' } },
+}, 'https://dice.stasis.test', diceImageSecret, () => 20)
+assert.equal(criticalInteraction.embeds[0].title.includes('Acerto crítico'), true)
+assert.equal(criticalInteraction.embeds[0].image.url.startsWith('https://dice.stasis.test/dice/image/'), true)
+assert.equal(criticalInteraction.embeds[0].footer.text, 'Resultado: 20')
+
+const interactionKeys = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])
+const rawInteraction = JSON.stringify({ type: 1 })
+const interactionTimestamp = '1787673600'
+const interactionSignature = new Uint8Array(await crypto.subtle.sign(
+  { name: 'Ed25519' },
+  interactionKeys.privateKey,
+  new TextEncoder().encode(`${interactionTimestamp}${rawInteraction}`),
+))
+const interactionPublicKey = new Uint8Array(await crypto.subtle.exportKey('raw', interactionKeys.publicKey))
+const toHex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+assert.equal(await verifyDiscordInteraction(rawInteraction, toHex(interactionSignature), interactionTimestamp, toHex(interactionPublicKey)), true)
+assert.equal(await verifyDiscordInteraction(`${rawInteraction} `, toHex(interactionSignature), interactionTimestamp, toHex(interactionPublicKey)), false)
 
 const poll = {
   id: 'poll-agenda-teste',
