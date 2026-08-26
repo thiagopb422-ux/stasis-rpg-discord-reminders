@@ -73,9 +73,10 @@ aplicação antes de qualquer rolagem. O comando aceita, por exemplo:
 - `d20@Lance de Percepção`
 - `2d6@Dano da Espada`
 - `d8+3@Teste de Agilidade`
+- `3d20+1d8@Ataque combinado`
 - `d100@Descoberta de Tesouro`
 
-São permitidos até quatro dados da mesma categoria por comando (ou dois D100). O resultado usa
+São permitidos até quatro dados somados entre todas as categorias por comando (ou dois D100). O resultado usa
 aleatoriedade criptográfica e gera uma URL curta assinada para a imagem. A rota
 de imagem combina os arquivos RGBA estáticos e entrega um PNG com cache
 imutável; ela não consulta o Firebase e não depende do cron.
@@ -83,9 +84,9 @@ imutável; ela não consulta o Firebase e não depende do cron.
 O conjunto visual `polyhedral_3d_blue_and_white` veio do DiscordDiceBot. Créditos
 e licença estão preservados em `THIRD_PARTY_LICENSES`.
 
-O conjunto padrão é o `Cósmico`: as 20 faces próprias do D20 ficam em
-`public/dice/source/cosmic/d20`, enquanto os demais formatos ainda usam o Azul
-como fallback. `/personalizar` permite ao usuário alternar entre `Cósmico` e
+O conjunto padrão é o `Cósmico`: D10, D12 e D20 possuem faces próprias em
+`public/dice/source/cosmic-compact` e derivados RGBA em `public/dice/raw/cosmic`;
+os demais formatos ainda usam o Azul como fallback. `/personalizar` permite ao usuário alternar entre `Cósmico` e
 `Azul`, com persistência gratuita no KV. A rota pública `/dice/combat-roll`
 fornece o D20 seguro do battlemap e mantém no Firestore somente as 20 rolagens
 recentes de cada mesa ativa.

@@ -134,6 +134,47 @@ const compactCosmicResponse = await renderDiceImage(
 assert.equal(compactCosmicResponse.status, 200)
 assert.equal(requestedCosmicAsset, '/dice/source/cosmic-compact/d20/d20s20.png')
 
+for (const [die, face] of [['d10', 10], ['d12', 12]]) {
+  const path = await createDiceImagePath([{ die, face }], diceImageSecret, 'cosmic')
+  let requestedAsset = ''
+  const response = await renderDiceImage(new Request(`https://dice.stasis.test${path}`), {
+    DICE_IMAGE_SECRET: diceImageSecret,
+    ASSETS: {
+      fetch: async (request) => {
+        requestedAsset = new URL(request.url).pathname
+        return new Response(new Uint8Array([137, 80, 78, 71]))
+      },
+    },
+  })
+  assert.equal(response.status, 200)
+  assert.equal(requestedAsset, `/dice/source/cosmic-compact/${die}/${die}s${face}.png`)
+}
+
+const mixedCosmicPath = await createDiceImagePath(
+  [{ die: 'd10', face: 7 }, { die: 'd12', face: 11 }, { die: 'd8', face: 4 }],
+  diceImageSecret,
+  'cosmic',
+)
+const requestedMixedAssets = []
+const mixedCosmicResponse = await renderDiceImage(
+  new Request(`https://dice.stasis.test${mixedCosmicPath}`),
+  {
+    DICE_IMAGE_SECRET: diceImageSecret,
+    ASSETS: {
+      fetch: async (request) => {
+        requestedMixedAssets.push(new URL(request.url).pathname)
+        return new Response(flatFace(35, 73, 214))
+      },
+    },
+  },
+)
+assert.equal(mixedCosmicResponse.status, 200)
+assert.deepEqual(requestedMixedAssets, [
+  '/dice/raw/cosmic/d10/d10s7.rgba',
+  '/dice/raw/cosmic/d12/d12s11.rgba',
+  '/dice/raw/d8/d8s4.rgba',
+])
+
 const criticalInteraction = await diceInteractionPayload({
   data: { options: [{ name: 'rolagem', value: 'd20@Lance de Percepção' }] },
   member: { nick: 'Aventureiro', user: { username: 'jogador' } },
