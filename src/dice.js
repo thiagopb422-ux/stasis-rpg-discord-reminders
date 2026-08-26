@@ -104,7 +104,7 @@ async function hmac(secret, value) {
 export async function createDiceImagePath(pieces, secret, style = "cosmic") {
   if (!secret) throw new Error("A chave das imagens de dados não está configurada.");
   const payload = bytesToBase64Url(textEncoder.encode(JSON.stringify({
-    version: 2,
+    version: 3,
     style: normalizeDiceStyle(style),
     pieces,
   })));
@@ -137,7 +137,7 @@ export async function readSignedDiceImagePath(pathname, secret) {
   if (!constantTimeEqual(expected, match[2])) return null;
   try {
     const data = JSON.parse(new TextDecoder().decode(base64UrlToBytes(match[1])));
-    if (![1, 2].includes(data?.version) || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
+    if (![1, 2, 3].includes(data?.version) || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
       return null;
     if (!data.pieces.every(validPiece)) return null;
     return {
@@ -236,7 +236,8 @@ export async function renderDiceImage(request, env) {
   try {
     if (pieces.length === 1) {
       const piece = pieces[0];
-      const assetUrl = new URL(`/dice/source/${assetStyle(piece)}/${piece.die}/${piece.die}s${piece.face}.png`, request.url);
+      const sourceStyle = assetStyle(piece) === "cosmic" ? "cosmic-compact" : "blue";
+      const assetUrl = new URL(`/dice/source/${sourceStyle}/${piece.die}/${piece.die}s${piece.face}.png`, request.url);
       const asset = await env.ASSETS.fetch(new Request(assetUrl));
       if (!asset.ok) throw new Error(`Face ${piece.die}/${piece.face} ausente.`);
       const headers = new Headers(asset.headers);

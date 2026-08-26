@@ -84,6 +84,27 @@ assert.equal(renderedDiceResponse.status, 200)
 assert.equal(renderedDiceResponse.headers.get('content-type'), 'image/png')
 assert.equal((await renderedDiceResponse.arrayBuffer()).byteLength > 100, true)
 
+const compactCosmicPath = await createDiceImagePath(
+  [{ die: 'd20', face: 20 }],
+  diceImageSecret,
+  'cosmic',
+)
+let requestedCosmicAsset = ''
+const compactCosmicResponse = await renderDiceImage(
+  new Request(`https://dice.stasis.test${compactCosmicPath}`),
+  {
+    DICE_IMAGE_SECRET: diceImageSecret,
+    ASSETS: {
+      fetch: async (request) => {
+        requestedCosmicAsset = new URL(request.url).pathname
+        return new Response(new Uint8Array([137, 80, 78, 71]))
+      },
+    },
+  },
+)
+assert.equal(compactCosmicResponse.status, 200)
+assert.equal(requestedCosmicAsset, '/dice/source/cosmic-compact/d20/d20s20.png')
+
 const criticalInteraction = await diceInteractionPayload({
   data: { options: [{ name: 'rolagem', value: 'd20@Lance de Percepção' }] },
   member: { nick: 'Aventureiro', user: { username: 'jogador' } },
