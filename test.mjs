@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   appendCombatDiceHistory,
+  cosmicDicePreview,
   directNotificationPayload,
   resolveSessionPollResult,
   resolveButtonEmoji,
@@ -112,6 +113,17 @@ const renderedDiceResponse = await renderDiceImage(diceImageRequest, {
 assert.equal(renderedDiceResponse.status, 200)
 assert.equal(renderedDiceResponse.headers.get('content-type'), 'image/png')
 assert.equal((await renderedDiceResponse.arrayBuffer()).byteLength > 100, true)
+
+const safeMarginPreview = await cosmicDicePreview(
+  new Request('https://dice.stasis.test/dice/cosmic-preview'),
+  {
+    DICE_IMAGE_SECRET: diceImageSecret,
+    ASSETS: { fetch: async () => new Response(flatFace(35, 73, 214)) },
+  },
+)
+assert.equal(safeMarginPreview.status, 200)
+assert.equal(safeMarginPreview.headers.get('content-type'), 'image/png')
+assert.equal(safeMarginPreview.headers.get('cache-control'), 'no-store')
 
 const compactCosmicPath = await createDiceImagePath(
   [{ die: 'd20', face: 20 }],

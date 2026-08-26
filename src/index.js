@@ -314,6 +314,18 @@ async function setupDiscordDice(request, env) {
   });
 }
 
+export async function cosmicDicePreview(request, env) {
+  const imagePath = await createDiceImagePath([
+    { die: "d8", face: 8 },
+    { die: "d10", face: 6 },
+    { die: "d6", face: 6 },
+  ], env.DICE_IMAGE_SECRET, "cosmic");
+  const response = await renderDiceImage(new Request(new URL(imagePath, request.url)), env);
+  const headers = new Headers(response.headers);
+  headers.set("cache-control", "no-store");
+  return new Response(response.body, { status: response.status, headers });
+}
+
 function publicJson(request, body, status = 200) {
   const origin = request.headers.get("origin") || "";
   const allowedOrigins = new Set([
@@ -1151,6 +1163,8 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/dice/image/") && request.method === "GET")
       return renderDiceImage(request, env);
+    if ((url.pathname === "/dice/cosmic-preview" || url.pathname === "/cosmic-preview") && request.method === "GET")
+      return cosmicDicePreview(request, env);
     if (url.pathname === "/discord/interactions" && request.method === "POST")
       return handleDiscordInteraction(request, env);
     if (url.pathname === "/discord/setup-dice" && request.method === "POST")
@@ -1160,7 +1174,7 @@ export default {
     if (url.pathname === "/dice/combat-roll" && request.method === "POST")
       return rollPublicCombatD20(request, env);
     if (url.pathname === "/health")
-      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-polls", "session-reminders", "direct-notifications", "submission-confirmations", "general-alerts", "visual-dice-command", "dice-personalization", "public-combat-d20"] });
+      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-polls", "session-reminders", "direct-notifications", "submission-confirmations", "general-alerts", "visual-dice-command", "dice-personalization", "public-combat-d20", "cosmic-safe-margin-v7"] });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "OPTIONS")
       return publicJson(request, { ok: true });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "POST")

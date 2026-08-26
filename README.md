@@ -91,6 +91,10 @@ o D100 é representado por dois D10 Cósmicos, para dezenas e unidades. `/person
 fornece o D20 seguro do battlemap e mantém no Firestore somente as 20 rolagens
 recentes de cada mesa ativa.
 
+As faces compactas usam conteúdo máximo de 84 × 84 dentro de uma tela transparente
+de 100 × 100. `scripts/validate_cosmic_assets.py` garante dimensões, derivados RGBA
+e pelo menos oito pixels de margem, evitando cortes na composição do Discord.
+
 O usuário técnico `Stasis Reminder Service` possui acesso estritamente identificado
 nas regras do Firestore. Apenas ele pode mover notificações de `pending` para
 `processing`, `sent` ou `failed`.

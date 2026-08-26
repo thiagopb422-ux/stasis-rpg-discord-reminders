@@ -14,6 +14,7 @@ D10_X = (0, 372, 682, 989, 1302, 1640)
 D10_Y = (0, 221, 432)
 D12_X = (0, 309, 569, 833, 1102, 1366, 1640)
 D12_Y = (432, 666, 920)
+FACE_MAX_SIZE = 84
 
 
 def visible_bounds(image: Image.Image, threshold: int = 12) -> tuple[int, int, int, int]:
@@ -56,7 +57,7 @@ def visible_bounds(image: Image.Image, threshold: int = 12) -> tuple[int, int, i
 
 def compact_face(cell: Image.Image) -> Image.Image:
     face = cell.crop(visible_bounds(cell))
-    face.thumbnail((96, 96), Image.Resampling.LANCZOS)
+    face.thumbnail((FACE_MAX_SIZE, FACE_MAX_SIZE), Image.Resampling.LANCZOS)
     canvas = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
     canvas.alpha_composite(face, ((100 - face.width) // 2, (100 - face.height) // 2))
     return canvas

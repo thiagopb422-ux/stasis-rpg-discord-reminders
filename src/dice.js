@@ -133,7 +133,7 @@ async function hmac(secret, value) {
 export async function createDiceImagePath(pieces, secret, style = "cosmic") {
   if (!secret) throw new Error("A chave das imagens de dados não está configurada.");
   const payload = bytesToBase64Url(textEncoder.encode(JSON.stringify({
-    version: 6,
+    version: 7,
     style: normalizeDiceStyle(style),
     pieces,
   })));
@@ -166,7 +166,7 @@ export async function readSignedDiceImagePath(pathname, secret) {
   if (!constantTimeEqual(expected, match[2])) return null;
   try {
     const data = JSON.parse(new TextDecoder().decode(base64UrlToBytes(match[1])));
-    if (![1, 2, 3, 4, 5, 6].includes(data?.version) || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
+    if (![1, 2, 3, 4, 5, 6, 7].includes(data?.version) || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
       return null;
     if (!data.pieces.every(validPiece)) return null;
     return {
