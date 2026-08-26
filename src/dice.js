@@ -274,7 +274,6 @@ export async function diceInteractionPayload(interaction, origin, secret, die = 
       : `🎲 ${label}`;
 
   return {
-    content: `${DICE_EMOJI} **Stasis RPG — Oráculo dos Dados**`,
     embeds: [{
       title,
       description: `**${displayName}** lançou **${canonicalNotation(result)}**.`,

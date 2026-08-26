@@ -76,6 +76,7 @@ const criticalInteraction = await diceInteractionPayload({
   data: { options: [{ name: 'rolagem', value: 'd20@Lance de Percepção' }] },
   member: { nick: 'Aventureiro', user: { username: 'jogador' } },
 }, 'https://dice.stasis.test', diceImageSecret, () => 20)
+assert.equal(criticalInteraction.content, undefined)
 assert.equal(criticalInteraction.embeds[0].title.includes('Acerto crítico'), true)
 assert.equal(criticalInteraction.embeds[0].image.url.startsWith('https://dice.stasis.test/dice/image/'), true)
 assert.equal(criticalInteraction.embeds[0].footer.text, 'Resultado: 20')
