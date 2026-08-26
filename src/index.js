@@ -1,9 +1,12 @@
 import {
-  DICE_COMMAND_DEFINITION,
+  DICE_COMMAND_DEFINITIONS,
   createDiceImagePath,
   diceInteractionError,
   diceInteractionPayload,
+  normalizeDiceStyle,
+  personalizeDiceInteractionPayload,
   renderDiceImage,
+  rollDice,
   verifyDiscordInteraction,
 } from "./dice.js";
 
@@ -229,14 +232,35 @@ async function handleDiscordInteraction(request, env) {
     return json({ ok: false, error: "Invalid interaction payload" }, 400);
   }
   if (interaction.type === 1) return json({ type: 1 });
-  if (interaction.type !== 2 || interaction.data?.name !== "r")
+  if (interaction.type !== 2 || !["r", "personalizar"].includes(interaction.data?.name))
     return json(diceInteractionError(new Error("Este comando ainda não pertence ao grimório do Stasis.")));
 
   try {
+    const discordUserId = String(interaction.member?.user?.id || interaction.user?.id || "");
+    if (interaction.data.name === "personalizar") {
+      const selected = normalizeDiceStyle(
+        interaction.data?.options?.find((item) => item.name === "estilo")?.value,
+      );
+      if (!discordUserId || !env.DICE_PREFERENCES)
+        throw new Error("O Oráculo não conseguiu guardar essa escolha agora.");
+      if (selected === "cosmic") await env.DICE_PREFERENCES.delete(`style:${discordUserId}`);
+      else await env.DICE_PREFERENCES.put(`style:${discordUserId}`, selected);
+      const data = await personalizeDiceInteractionPayload(
+        interaction,
+        new URL(request.url).origin,
+        env.DICE_IMAGE_SECRET,
+      );
+      return json({ type: 4, data });
+    }
+    const style = discordUserId && env.DICE_PREFERENCES
+      ? normalizeDiceStyle(await env.DICE_PREFERENCES.get(`style:${discordUserId}`))
+      : "cosmic";
     const data = await diceInteractionPayload(
       interaction,
       new URL(request.url).origin,
       env.DICE_IMAGE_SECRET,
+      undefined,
+      style,
     );
     return json({ type: 4, data });
   } catch (error) {
@@ -255,17 +279,20 @@ async function setupDiscordDice(request, env) {
     method: "PATCH",
     body: JSON.stringify({ interactions_endpoint_url: endpointUrl }),
   });
-  const command = await discord(env, `/applications/${application.id}/guilds/${guildId}/commands`, {
-    method: "POST",
-    body: JSON.stringify(DICE_COMMAND_DEFINITION),
-  });
+  const commands = [];
+  for (const definition of DICE_COMMAND_DEFINITIONS) {
+    commands.push(await discord(env, `/applications/${application.id}/guilds/${guildId}/commands`, {
+      method: "POST",
+      body: JSON.stringify(definition),
+    }));
+  }
   const previewImageUrl = `${origin}${await createDiceImagePath([
     { die: "d20", face: 20 },
     { die: "d6", face: 4 },
-  ], env.DICE_IMAGE_SECRET)}`;
+  ], env.DICE_IMAGE_SECRET, "cosmic")}`;
   const previewD8ImageUrl = `${origin}${await createDiceImagePath([
     { die: "d8", face: 8 },
-  ], env.DICE_IMAGE_SECRET)}`;
+  ], env.DICE_IMAGE_SECRET, "blue")}`;
   return json({
     ok: true,
     applicationId: application.id,
@@ -275,7 +302,11 @@ async function setupDiscordDice(request, env) {
     endpointUrl,
     previewImageUrl,
     previewD8ImageUrl,
-    command: { id: command.id, name: command.name, description: command.description },
+    commands: commands.map((command) => ({
+      id: command.id,
+      name: command.name,
+      description: command.description,
+    })),
   });
 }
 
@@ -293,11 +324,56 @@ function publicJson(request, body, status = 200) {
       "access-control-allow-origin": allowedOrigins.has(origin)
         ? origin
         : "https://stasisrpg.web.app",
-      "access-control-allow-methods": "POST, OPTIONS",
+      "access-control-allow-methods": "GET, POST, OPTIONS",
       "access-control-allow-headers": "content-type",
       "vary": "Origin",
     },
   });
+}
+
+export function appendCombatDiceHistory(history, roll, limit = 20) {
+  const previous = Array.isArray(history) ? history : [];
+  return [roll, ...previous]
+    .filter((item) =>
+      item && Number.isInteger(Number(item.result)) &&
+      Number(item.result) >= 1 && Number(item.result) <= 20 &&
+      typeof item.createdAt === "string",
+    )
+    .slice(0, Math.max(1, Math.min(50, Number(limit) || 20)));
+}
+
+async function rollPublicCombatD20(request, env) {
+  try {
+    const body = await request.json();
+    const roomId = String(body?.combatId || "").trim();
+    if (!/^[A-Za-z0-9_-]{10,120}$/.test(roomId))
+      return publicJson(request, { ok: false, error: "Esta mesa não foi reconhecida." }, 400);
+    const firebaseToken = await firebaseAccessToken(env);
+    const room = await getDocument(env, firebaseToken, "publicCombatRooms", roomId);
+    if (!room || room.status !== "active")
+      return publicJson(request, { ok: false, error: "Esta mesa não está mais ativa." }, 404);
+    const result = rollDice({ quantity: 1, sides: 20, modifier: 0, title: "" }).rolls[0];
+    const now = new Date().toISOString();
+    const history = await getDocument(env, firebaseToken, "combatDiceHistories", roomId);
+    const roll = { id: crypto.randomUUID(), result, createdAt: now };
+    await patchDocument(env, firebaseToken, "combatDiceHistories", roomId, {
+      roomId,
+      rolls: appendCombatDiceHistory(history?.rolls, roll),
+      updatedAt: now,
+    }, history?._updateTime || "");
+    const origin = new URL(request.url).origin;
+    return publicJson(request, {
+      ok: true,
+      roll,
+      imageUrl: `${origin}/dice/source/cosmic/d20/d20s${result}.png`,
+    });
+  } catch (error) {
+    console.error("public-combat-d20", error);
+    return publicJson(request, {
+      ok: false,
+      error: "As energias do dado se dispersaram. Tente novamente em instantes.",
+    }, 500);
+  }
 }
 
 export async function sendDiscordAttachment(env, channelId, payload, filename, contents) {
@@ -1075,8 +1151,12 @@ export default {
       return handleDiscordInteraction(request, env);
     if (url.pathname === "/discord/setup-dice" && request.method === "POST")
       return setupDiscordDice(request, env);
+    if (url.pathname === "/dice/combat-roll" && request.method === "OPTIONS")
+      return publicJson(request, { ok: true });
+    if (url.pathname === "/dice/combat-roll" && request.method === "POST")
+      return rollPublicCombatD20(request, env);
     if (url.pathname === "/health")
-      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-polls", "session-reminders", "direct-notifications", "submission-confirmations", "general-alerts", "visual-dice-command"] });
+      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-polls", "session-reminders", "direct-notifications", "submission-confirmations", "general-alerts", "visual-dice-command", "dice-personalization", "public-combat-d20"] });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "OPTIONS")
       return publicJson(request, { ok: true });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "POST")

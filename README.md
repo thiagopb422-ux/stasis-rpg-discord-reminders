@@ -58,6 +58,9 @@ O Worker confere a supressão outra vez imediatamente antes de cada DM.
 - `DICE_IMAGE_SECRET`
 - `DICE_SETUP_SECRET`
 
+O Worker também usa o binding KV `DICE_PREFERENCES`. Ele guarda somente a
+escolha visual de cada usuário (`cosmic` ou `blue`); não armazena resultados.
+
 Na Cloudflare também existe `RUN_SECRET`, usado somente pelo endpoint protegido
 de diagnóstico. Valores sensíveis nunca devem ser colocados no `wrangler.toml`.
 
@@ -79,6 +82,13 @@ imutável; ela não consulta o Firebase e não depende do cron.
 
 O conjunto visual `polyhedral_3d_blue_and_white` veio do DiscordDiceBot. Créditos
 e licença estão preservados em `THIRD_PARTY_LICENSES`.
+
+O conjunto padrão é o `Cósmico`: as 20 faces próprias do D20 ficam em
+`public/dice/source/cosmic/d20`, enquanto os demais formatos ainda usam o Azul
+como fallback. `/personalizar` permite ao usuário alternar entre `Cósmico` e
+`Azul`, com persistência gratuita no KV. A rota pública `/dice/combat-roll`
+fornece o D20 seguro do battlemap e mantém no Firestore somente as 20 rolagens
+recentes de cada mesa ativa.
 
 O usuário técnico `Stasis Reminder Service` possui acesso estritamente identificado
 nas regras do Firestore. Apenas ele pode mover notificações de `pending` para

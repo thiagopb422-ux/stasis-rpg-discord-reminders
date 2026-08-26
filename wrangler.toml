@@ -6,6 +6,10 @@ compatibility_date = "2026-08-12"
 directory = "./public"
 binding = "ASSETS"
 
+[[kv_namespaces]]
+binding = "DICE_PREFERENCES"
+id = "80b6a3d206ab4832b50d83ae0974455e"
+
 [triggers]
 crons = ["* * * * *"]
 

@@ -4,7 +4,14 @@ const DICE_EMOJI = "<:d20:1537217597077200997>";
 const DEFAULT_EMBED_COLOR = 0x315bd6;
 const CRITICAL_EMBED_COLOR = 0xd3a64a;
 const FAILURE_EMBED_COLOR = 0x9f2f3f;
+const DICE_STYLES = new Set(["cosmic", "blue"]);
 const textEncoder = new TextEncoder();
+
+export function normalizeDiceStyle(value) {
+  return DICE_STYLES.has(String(value || "").toLowerCase())
+    ? String(value).toLowerCase()
+    : "cosmic";
+}
 
 function safeText(value, max = 100) {
   return String(value || "")
@@ -94,9 +101,13 @@ async function hmac(secret, value) {
   return new Uint8Array(await crypto.subtle.sign("HMAC", key, textEncoder.encode(value)));
 }
 
-export async function createDiceImagePath(pieces, secret) {
+export async function createDiceImagePath(pieces, secret, style = "cosmic") {
   if (!secret) throw new Error("A chave das imagens de dados não está configurada.");
-  const payload = bytesToBase64Url(textEncoder.encode(JSON.stringify({ version: 1, pieces })));
+  const payload = bytesToBase64Url(textEncoder.encode(JSON.stringify({
+    version: 2,
+    style: normalizeDiceStyle(style),
+    pieces,
+  })));
   const signature = bytesToBase64Url(await hmac(secret, payload)).slice(0, 32);
   return `/dice/image/${payload}.${signature}.png`;
 }
@@ -126,10 +137,13 @@ export async function readSignedDiceImagePath(pathname, secret) {
   if (!constantTimeEqual(expected, match[2])) return null;
   try {
     const data = JSON.parse(new TextDecoder().decode(base64UrlToBytes(match[1])));
-    if (data?.version !== 1 || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
+    if (![1, 2].includes(data?.version) || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
       return null;
     if (!data.pieces.every(validPiece)) return null;
-    return data.pieces;
+    return {
+      style: data.version === 1 ? "blue" : normalizeDiceStyle(data.style),
+      pieces: data.pieces,
+    };
   } catch {
     return null;
   }
@@ -214,13 +228,15 @@ export async function composeDiceImage(pieces, loadFace) {
 }
 
 export async function renderDiceImage(request, env) {
-  const pieces = await readSignedDiceImagePath(new URL(request.url).pathname, env.DICE_IMAGE_SECRET);
-  if (!pieces) return new Response("A visão desta rolagem se dissipou.", { status: 404 });
+  const signed = await readSignedDiceImagePath(new URL(request.url).pathname, env.DICE_IMAGE_SECRET);
+  if (!signed) return new Response("A visão desta rolagem se dissipou.", { status: 404 });
+  const { pieces, style } = signed;
   if (!env.ASSETS?.fetch) return new Response("As faces dos dados não estão disponíveis.", { status: 503 });
+  const assetStyle = (piece) => style === "cosmic" && piece.die === "d20" ? "cosmic" : "blue";
   try {
     if (pieces.length === 1) {
       const piece = pieces[0];
-      const assetUrl = new URL(`/dice/source/blue/${piece.die}/${piece.die}s${piece.face}.png`, request.url);
+      const assetUrl = new URL(`/dice/source/${assetStyle(piece)}/${piece.die}/${piece.die}s${piece.face}.png`, request.url);
       const asset = await env.ASSETS.fetch(new Request(assetUrl));
       if (!asset.ok) throw new Error(`Face ${piece.die}/${piece.face} ausente.`);
       const headers = new Headers(asset.headers);
@@ -231,7 +247,13 @@ export async function renderDiceImage(request, env) {
       return new Response(asset.body, { status: asset.status, headers });
     }
     const png = await composeDiceImage(pieces, async (piece) => {
-      const assetUrl = new URL(`/dice/raw/${piece.die}/${piece.die}s${piece.face}.rgba`, request.url);
+      const faceStyle = assetStyle(piece);
+      const assetUrl = new URL(
+        faceStyle === "cosmic"
+          ? `/dice/raw/cosmic/${piece.die}/${piece.die}s${piece.face}.rgba`
+          : `/dice/raw/${piece.die}/${piece.die}s${piece.face}.rgba`,
+        request.url,
+      );
       const response = await env.ASSETS.fetch(new Request(assetUrl));
       if (!response.ok) throw new Error(`Face ${piece.die}/${piece.face} ausente.`);
       return new Uint8Array(await response.arrayBuffer());
@@ -262,11 +284,11 @@ function resultFooter(result) {
   return `Dados: ${dice}${modifier}  •  Total: ${result.total}`;
 }
 
-export async function diceInteractionPayload(interaction, origin, secret, die = secureDie) {
+export async function diceInteractionPayload(interaction, origin, secret, die = secureDie, style = "cosmic") {
   const option = interaction?.data?.options?.find((item) => item.name === "rolagem");
   const parsed = parseDiceNotation(option?.value);
   const result = rollDice(parsed, die);
-  const imagePath = await createDiceImagePath(diceImagePieces(result), secret);
+  const imagePath = await createDiceImagePath(diceImagePieces(result), secret, style);
   const naturalCritical = result.quantity === 1 && result.sides === 20 && result.rolls[0] === 20;
   const naturalFailure = result.quantity === 1 && result.sides === 20 && result.rolls[0] === 1;
   const label = result.title || "Rolagem de Dados";
@@ -283,6 +305,26 @@ export async function diceInteractionPayload(interaction, origin, secret, die = 
       color: naturalCritical ? CRITICAL_EMBED_COLOR : naturalFailure ? FAILURE_EMBED_COLOR : DEFAULT_EMBED_COLOR,
       image: { url: `${String(origin).replace(/\/$/, "")}${imagePath}` },
       footer: { text: resultFooter(result) },
+    }],
+    allowed_mentions: { parse: [] },
+  };
+}
+
+export async function personalizeDiceInteractionPayload(interaction, origin, secret) {
+  const selected = interaction?.data?.options?.find((item) => item.name === "estilo")?.value;
+  const style = normalizeDiceStyle(selected);
+  const imagePath = await createDiceImagePath([{ die: "d20", face: 20 }], secret, style);
+  const label = style === "blue" ? "Azul" : "Cósmico";
+  return {
+    flags: 64,
+    embeds: [{
+      title: `✨ Conjunto ${label} selecionado`,
+      description: style === "cosmic"
+        ? "Este é o novo padrão do Stasis. Por enquanto, o D20 usa a arte Cósmica e os demais dados mantêm as faces azuis."
+        : "Todas as suas rolagens voltaram a usar o conjunto clássico azul.",
+      color: style === "cosmic" ? 0x7b4fd5 : DEFAULT_EMBED_COLOR,
+      thumbnail: { url: `${String(origin).replace(/\/$/, "")}${imagePath}` },
+      footer: { text: "A escolha fica salva para as próximas rolagens." },
     }],
     allowed_mentions: { parse: [] },
   };
@@ -325,3 +367,24 @@ export const DICE_COMMAND_DEFINITION = {
     max_length: 120,
   }],
 };
+
+export const DICE_PERSONALIZE_COMMAND_DEFINITION = {
+  name: "personalizar",
+  type: 1,
+  description: "Escolha a aparência dos seus dados do Stasis RPG",
+  options: [{
+    name: "estilo",
+    description: "O conjunto visual usado nas próximas rolagens",
+    type: 3,
+    required: true,
+    choices: [
+      { name: "Cósmico (padrão)", value: "cosmic" },
+      { name: "Azul", value: "blue" },
+    ],
+  }],
+};
+
+export const DICE_COMMAND_DEFINITIONS = [
+  DICE_COMMAND_DEFINITION,
+  DICE_PERSONALIZE_COMMAND_DEFINITION,
+];

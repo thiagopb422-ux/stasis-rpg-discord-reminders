@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  appendCombatDiceHistory,
   directNotificationPayload,
   resolveSessionPollResult,
   resolveButtonEmoji,
@@ -15,7 +16,9 @@ import {
   createDiceImagePath,
   diceImagePieces,
   diceInteractionPayload,
+  normalizeDiceStyle,
   parseDiceNotation,
+  personalizeDiceInteractionPayload,
   readSignedDiceImagePath,
   renderDiceImage,
   rollDice,
@@ -54,8 +57,13 @@ assert.deepEqual(diceImagePieces({ sides: 100, rolls: [100] }), [
 const diceImageSecret = 'segredo-local-de-imagem'
 const dicePieces = [{ die: 'd20', face: 20 }, { die: 'd6', face: 4 }]
 const signedDicePath = await createDiceImagePath(dicePieces, diceImageSecret)
-assert.deepEqual(await readSignedDiceImagePath(signedDicePath, diceImageSecret), dicePieces)
+assert.deepEqual(await readSignedDiceImagePath(signedDicePath, diceImageSecret), {
+  style: 'cosmic',
+  pieces: dicePieces,
+})
 assert.equal(await readSignedDiceImagePath(signedDicePath.replace('.png', 'x.png'), diceImageSecret), null)
+assert.equal(normalizeDiceStyle('blue'), 'blue')
+assert.equal(normalizeDiceStyle('qualquer-coisa'), 'cosmic')
 
 const flatFace = (red, green, blue) => {
   const face = new Uint8Array(100 * 100 * 4)
@@ -86,6 +94,26 @@ assert.equal(JSON.stringify(criticalInteraction).includes('Aventureiro'), false)
 assert.equal(criticalInteraction.embeds[0].title.includes('Acerto crítico'), true)
 assert.equal(criticalInteraction.embeds[0].image.url.startsWith('https://dice.stasis.test/dice/image/'), true)
 assert.equal(criticalInteraction.embeds[0].footer.text, 'Resultado: 20')
+
+const blueInteraction = await diceInteractionPayload({
+  data: { options: [{ name: 'rolagem', value: 'd20' }] },
+}, 'https://dice.stasis.test', diceImageSecret, () => 8, 'blue')
+const blueSignedUrl = new URL(blueInteraction.embeds[0].image.url)
+assert.equal((await readSignedDiceImagePath(blueSignedUrl.pathname, diceImageSecret)).style, 'blue')
+
+const personalizeInteraction = await personalizeDiceInteractionPayload({
+  data: { options: [{ name: 'estilo', value: 'cosmic' }] },
+}, 'https://dice.stasis.test', diceImageSecret)
+assert.equal(personalizeInteraction.flags, 64)
+assert.equal(personalizeInteraction.embeds[0].title.includes('Cósmico'), true)
+
+const combatHistory = appendCombatDiceHistory([
+  { id: 'anterior', result: 7, createdAt: '2026-08-26T12:00:00.000Z' },
+], { id: 'novo', result: 20, createdAt: '2026-08-26T12:01:00.000Z' }, 2)
+assert.deepEqual(combatHistory.map((item) => item.result), [20, 7])
+assert.equal(appendCombatDiceHistory(combatHistory, {
+  id: 'invalido', result: 21, createdAt: '2026-08-26T12:02:00.000Z',
+}).some((item) => item.result === 21), false)
 
 const interactionKeys = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])
 const rawInteraction = JSON.stringify({ type: 1 })
