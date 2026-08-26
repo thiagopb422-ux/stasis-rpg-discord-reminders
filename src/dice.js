@@ -262,8 +262,6 @@ export async function diceInteractionPayload(interaction, origin, secret, die = 
   const parsed = parseDiceNotation(option?.value);
   const result = rollDice(parsed, die);
   const imagePath = await createDiceImagePath(diceImagePieces(result), secret);
-  const user = interaction?.member?.user || interaction?.user || {};
-  const displayName = safeText(interaction?.member?.nick || user.global_name || user.username || "Aventureiro", 80);
   const naturalCritical = result.quantity === 1 && result.sides === 20 && result.rolls[0] === 20;
   const naturalFailure = result.quantity === 1 && result.sides === 20 && result.rolls[0] === 1;
   const label = result.title || "Rolagem de Dados";
@@ -276,7 +274,7 @@ export async function diceInteractionPayload(interaction, origin, secret, die = 
   return {
     embeds: [{
       title,
-      description: `**${displayName}** lançou **${canonicalNotation(result)}**.`,
+      description: `**${canonicalNotation(result)}**`,
       color: naturalCritical ? CRITICAL_EMBED_COLOR : naturalFailure ? FAILURE_EMBED_COLOR : DEFAULT_EMBED_COLOR,
       image: { url: `${String(origin).replace(/\/$/, "")}${imagePath}` },
       footer: { text: resultFooter(result) },

@@ -77,6 +77,8 @@ const criticalInteraction = await diceInteractionPayload({
   member: { nick: 'Aventureiro', user: { username: 'jogador' } },
 }, 'https://dice.stasis.test', diceImageSecret, () => 20)
 assert.equal(criticalInteraction.content, undefined)
+assert.equal(criticalInteraction.embeds[0].description, '**D20**')
+assert.equal(JSON.stringify(criticalInteraction).includes('Aventureiro'), false)
 assert.equal(criticalInteraction.embeds[0].title.includes('Acerto crítico'), true)
 assert.equal(criticalInteraction.embeds[0].image.url.startsWith('https://dice.stasis.test/dice/image/'), true)
 assert.equal(criticalInteraction.embeds[0].footer.text, 'Resultado: 20')
