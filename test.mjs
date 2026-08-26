@@ -116,6 +116,14 @@ assert.equal(criticalInteraction.embeds[0].title.includes('Acerto crítico'), tr
 assert.equal(criticalInteraction.embeds[0].image.url.startsWith('https://dice.stasis.test/dice/image/'), true)
 assert.equal(criticalInteraction.embeds[0].footer.text, 'Resultado: 20')
 
+const modifiedInteraction = await diceInteractionPayload({
+  data: { options: [{ name: 'rolagem', value: 'd20+5@Percepção' }] },
+}, 'https://dice.stasis.test', diceImageSecret, () => 11)
+assert.equal(modifiedInteraction.embeds[0].footer.text, 'Dados: 11 + 5')
+assert.deepEqual(modifiedInteraction.embeds[0].fields, [
+  { name: 'TOTAL', value: '**16**', inline: true },
+])
+
 const blueInteraction = await diceInteractionPayload({
   data: { options: [{ name: 'rolagem', value: 'd20' }] },
 }, 'https://dice.stasis.test', diceImageSecret, () => 8, 'blue')

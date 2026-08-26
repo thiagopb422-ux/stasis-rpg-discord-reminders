@@ -282,7 +282,7 @@ function resultFooter(result) {
   const dice = result.rolls.join(" + ");
   if (!result.modifier && result.rolls.length === 1) return `Resultado: ${result.total}`;
   const modifier = result.modifier ? ` ${result.modifier > 0 ? "+" : "−"} ${Math.abs(result.modifier)}` : "";
-  return `Dados: ${dice}${modifier}  •  Total: ${result.total}`;
+  return `Dados: ${dice}${modifier}`;
 }
 
 export async function diceInteractionPayload(interaction, origin, secret, die = secureDie, style = "cosmic") {
@@ -293,6 +293,7 @@ export async function diceInteractionPayload(interaction, origin, secret, die = 
   const naturalCritical = result.quantity === 1 && result.sides === 20 && result.rolls[0] === 20;
   const naturalFailure = result.quantity === 1 && result.sides === 20 && result.rolls[0] === 1;
   const label = result.title || "Rolagem de Dados";
+  const showTotalField = Boolean(result.modifier) || result.rolls.length > 1;
   const title = naturalCritical
     ? `✨ Acerto crítico — ${label}`
     : naturalFailure
@@ -305,6 +306,9 @@ export async function diceInteractionPayload(interaction, origin, secret, die = 
       description: `**${canonicalNotation(result)}**`,
       color: naturalCritical ? CRITICAL_EMBED_COLOR : naturalFailure ? FAILURE_EMBED_COLOR : DEFAULT_EMBED_COLOR,
       image: { url: `${String(origin).replace(/\/$/, "")}${imagePath}` },
+      ...(showTotalField ? {
+        fields: [{ name: "TOTAL", value: `**${result.total}**`, inline: true }],
+      } : {}),
       footer: { text: resultFooter(result) },
     }],
     allowed_mentions: { parse: [] },
