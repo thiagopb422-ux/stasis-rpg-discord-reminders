@@ -5,7 +5,7 @@ const DEFAULT_EMBED_COLOR = 0x315bd6;
 const CRITICAL_EMBED_COLOR = 0xd3a64a;
 const FAILURE_EMBED_COLOR = 0x9f2f3f;
 const DICE_STYLES = new Set(["cosmic", "blue"]);
-const COSMIC_DICE = new Set(["d10", "d12", "d20"]);
+const COSMIC_DICE = new Set(["d4", "d6", "d8", "d10", "d12", "d20"]);
 const textEncoder = new TextEncoder();
 
 export function normalizeDiceStyle(value) {
@@ -133,7 +133,7 @@ async function hmac(secret, value) {
 export async function createDiceImagePath(pieces, secret, style = "cosmic") {
   if (!secret) throw new Error("A chave das imagens de dados não está configurada.");
   const payload = bytesToBase64Url(textEncoder.encode(JSON.stringify({
-    version: 5,
+    version: 6,
     style: normalizeDiceStyle(style),
     pieces,
   })));
@@ -166,7 +166,7 @@ export async function readSignedDiceImagePath(pathname, secret) {
   if (!constantTimeEqual(expected, match[2])) return null;
   try {
     const data = JSON.parse(new TextDecoder().decode(base64UrlToBytes(match[1])));
-    if (![1, 2, 3, 4, 5].includes(data?.version) || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
+    if (![1, 2, 3, 4, 5, 6].includes(data?.version) || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
       return null;
     if (!data.pieces.every(validPiece)) return null;
     return {
@@ -261,10 +261,13 @@ export async function renderDiceImage(request, env) {
   if (!signed) return new Response("A visão desta rolagem se dissipou.", { status: 404 });
   const { pieces, style } = signed;
   if (!env.ASSETS?.fetch) return new Response("As faces dos dados não estão disponíveis.", { status: 503 });
-  const assetStyle = (piece) => style === "cosmic" && COSMIC_DICE.has(piece.die) ? "cosmic" : "blue";
+  const assetPiece = (piece) => style === "cosmic" && piece.die === "d100"
+    ? { ...piece, die: "d10" }
+    : piece;
+  const assetStyle = (piece) => style === "cosmic" && COSMIC_DICE.has(assetPiece(piece).die) ? "cosmic" : "blue";
   try {
     if (pieces.length === 1) {
-      const piece = pieces[0];
+      const piece = assetPiece(pieces[0]);
       const sourceStyle = assetStyle(piece) === "cosmic" ? "cosmic-compact" : "blue";
       const assetUrl = new URL(`/dice/source/${sourceStyle}/${piece.die}/${piece.die}s${piece.face}.png`, request.url);
       const asset = await env.ASSETS.fetch(new Request(assetUrl));
@@ -277,11 +280,12 @@ export async function renderDiceImage(request, env) {
       return new Response(asset.body, { status: asset.status, headers });
     }
     const png = await composeDiceImage(pieces, async (piece) => {
-      const faceStyle = assetStyle(piece);
+      const selectedPiece = assetPiece(piece);
+      const faceStyle = assetStyle(selectedPiece);
       const assetUrl = new URL(
         faceStyle === "cosmic"
-          ? `/dice/raw/cosmic/${piece.die}/${piece.die}s${piece.face}.rgba`
-          : `/dice/raw/${piece.die}/${piece.die}s${piece.face}.rgba`,
+          ? `/dice/raw/cosmic/${selectedPiece.die}/${selectedPiece.die}s${selectedPiece.face}.rgba`
+          : `/dice/raw/${selectedPiece.die}/${selectedPiece.die}s${selectedPiece.face}.rgba`,
         request.url,
       );
       const response = await env.ASSETS.fetch(new Request(assetUrl));
@@ -358,7 +362,7 @@ export async function personalizeDiceInteractionPayload(interaction, origin, sec
     embeds: [{
       title: `✨ Conjunto ${label} selecionado`,
       description: style === "cosmic"
-        ? "Este é o padrão do Stasis. D10, D12 e D20 usam a arte Cósmica; os demais dados mantêm as faces azuis."
+        ? "Este é o padrão completo do Stasis. D4, D6, D8, D10, D12, D20 e D100 usam a arte Cósmica."
         : "Todas as suas rolagens voltaram a usar o conjunto clássico azul.",
       color: style === "cosmic" ? 0x7b4fd5 : DEFAULT_EMBED_COLOR,
       thumbnail: { url: `${String(origin).replace(/\/$/, "")}${imagePath}` },

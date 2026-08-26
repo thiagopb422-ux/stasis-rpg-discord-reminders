@@ -287,6 +287,9 @@ async function setupDiscordDice(request, env) {
     }));
   }
   const previewImageUrl = `${origin}${await createDiceImagePath([
+    { die: "d4", face: 4 },
+    { die: "d6", face: 6 },
+    { die: "d8", face: 8 },
     { die: "d10", face: 10 },
     { die: "d12", face: 12 },
     { die: "d20", face: 20 },

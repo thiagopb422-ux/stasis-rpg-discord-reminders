@@ -134,7 +134,7 @@ const compactCosmicResponse = await renderDiceImage(
 assert.equal(compactCosmicResponse.status, 200)
 assert.equal(requestedCosmicAsset, '/dice/source/cosmic-compact/d20/d20s20.png')
 
-for (const [die, face] of [['d10', 10], ['d12', 12]]) {
+for (const [die, face] of [['d4', 4], ['d6', 6], ['d8', 8], ['d10', 10], ['d12', 12]]) {
   const path = await createDiceImagePath([{ die, face }], diceImageSecret, 'cosmic')
   let requestedAsset = ''
   const response = await renderDiceImage(new Request(`https://dice.stasis.test${path}`), {
@@ -172,7 +172,31 @@ assert.equal(mixedCosmicResponse.status, 200)
 assert.deepEqual(requestedMixedAssets, [
   '/dice/raw/cosmic/d10/d10s7.rgba',
   '/dice/raw/cosmic/d12/d12s11.rgba',
-  '/dice/raw/d8/d8s4.rgba',
+  '/dice/raw/cosmic/d8/d8s4.rgba',
+])
+
+const cosmicD100Path = await createDiceImagePath(
+  [{ die: 'd100', face: 3 }, { die: 'd10', face: 7 }],
+  diceImageSecret,
+  'cosmic',
+)
+const requestedD100Assets = []
+const cosmicD100Response = await renderDiceImage(
+  new Request(`https://dice.stasis.test${cosmicD100Path}`),
+  {
+    DICE_IMAGE_SECRET: diceImageSecret,
+    ASSETS: {
+      fetch: async (request) => {
+        requestedD100Assets.push(new URL(request.url).pathname)
+        return new Response(flatFace(35, 73, 214))
+      },
+    },
+  },
+)
+assert.equal(cosmicD100Response.status, 200)
+assert.deepEqual(requestedD100Assets, [
+  '/dice/raw/cosmic/d10/d10s3.rgba',
+  '/dice/raw/cosmic/d10/d10s7.rgba',
 ])
 
 const criticalInteraction = await diceInteractionPayload({

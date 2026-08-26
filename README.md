@@ -84,9 +84,9 @@ imutável; ela não consulta o Firebase e não depende do cron.
 O conjunto visual `polyhedral_3d_blue_and_white` veio do DiscordDiceBot. Créditos
 e licença estão preservados em `THIRD_PARTY_LICENSES`.
 
-O conjunto padrão é o `Cósmico`: D10, D12 e D20 possuem faces próprias em
+O conjunto padrão é o `Cósmico`: D4, D6, D8, D10, D12 e D20 possuem faces próprias em
 `public/dice/source/cosmic-compact` e derivados RGBA em `public/dice/raw/cosmic`;
-os demais formatos ainda usam o Azul como fallback. `/personalizar` permite ao usuário alternar entre `Cósmico` e
+o D100 é representado por dois D10 Cósmicos, para dezenas e unidades. `/personalizar` permite ao usuário alternar entre `Cósmico` e
 `Azul`, com persistência gratuita no KV. A rota pública `/dice/combat-roll`
 fornece o D20 seguro do battlemap e mantém no Firestore somente as 20 rolagens
 recentes de cada mesa ativa.
