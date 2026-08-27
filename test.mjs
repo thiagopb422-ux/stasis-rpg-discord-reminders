@@ -309,14 +309,23 @@ const criticalInteraction = await diceInteractionPayload({
 assert.equal(criticalInteraction.content, undefined)
 assert.equal(criticalInteraction.embeds[0].description, '**D20**  •  Resultado: **20**')
 assert.equal(JSON.stringify(criticalInteraction).includes('Aventureiro'), false)
-assert.equal(criticalInteraction.embeds[0].title.includes('Acerto crítico'), true)
+assert.equal(criticalInteraction.embeds[0].title, '<:critico:1112064472102744094> Acerto Crítico!')
+assert.equal(criticalInteraction.embeds[0].color, 0xd3a64a)
 assert.equal(criticalInteraction.embeds[0].image.url.startsWith('https://dice.stasis.test/dice/image/'), true)
 assert.equal(criticalInteraction.embeds[0].footer, undefined)
+
+const failureInteraction = await diceInteractionPayload({
+  data: { options: [{ name: 'rolagem', value: 'd20@Ataque desesperado' }] },
+}, 'https://dice.stasis.test', diceImageSecret, () => 1)
+assert.equal(failureInteraction.embeds[0].title, '<:veneno:1125823654383583333> Falha Crítica!!')
+assert.equal(failureInteraction.embeds[0].description, '**D20**  •  Resultado: **1**')
+assert.equal(failureInteraction.embeds[0].color, 0x9f2f3f)
 
 const modifiedInteraction = await diceInteractionPayload({
   data: { options: [{ name: 'rolagem', value: 'd20+5@Percepção' }] },
 }, 'https://dice.stasis.test', diceImageSecret, () => 11)
 assert.equal(modifiedInteraction.embeds[0].description, '**D20+5**  •  Total: **16**')
+assert.equal(modifiedInteraction.embeds[0].title, '<:d203:1538334679596535878> Percepção')
 assert.equal(modifiedInteraction.embeds[0].footer, undefined)
 assert.equal(modifiedInteraction.embeds[0].fields, undefined)
 
@@ -327,6 +336,7 @@ const mixedInteraction = await diceInteractionPayload({
   return () => values.shift()
 })())
 assert.equal(mixedInteraction.embeds[0].description, '**3D20+D8**  •  Total: **41**')
+assert.equal(mixedInteraction.embeds[0].title, '<:d203:1538334679596535878> O Destino Diz ...')
 assert.equal(mixedInteraction.embeds[0].footer, undefined)
 assert.equal(mixedInteraction.embeds[0].fields, undefined)
 

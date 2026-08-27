@@ -1,6 +1,9 @@
 const SUPPORTED_DICE = new Set([4, 6, 8, 10, 12, 20, 100]);
 const MAX_DICE_PER_ROLL = 6;
 const DICE_EMOJI = "<:d20:1537217597077200997>";
+const DESTINY_EMOJI = "<:d203:1538334679596535878>";
+const CRITICAL_EMOJI = "<:critico:1112064472102744094>";
+const FAILURE_EMOJI = "<:veneno:1125823654383583333>";
 const DEFAULT_EMBED_COLOR = 0x315bd6;
 const CRITICAL_EMBED_COLOR = 0xd3a64a;
 const FAILURE_EMBED_COLOR = 0x9f2f3f;
@@ -333,13 +336,13 @@ export async function diceInteractionPayload(interaction, origin, secret, die = 
   const imagePath = await createDiceImagePath(diceImagePieces(result), secret, style);
   const naturalCritical = result.diceRolls.length === 1 && result.diceRolls[0].sides === 20 && result.rolls[0] === 20;
   const naturalFailure = result.diceRolls.length === 1 && result.diceRolls[0].sides === 20 && result.rolls[0] === 1;
-  const label = result.title || "Rolagem de Dados";
+  const label = result.title || "O Destino Diz ...";
   const resultLabel = result.rolls.length === 1 && !result.modifier ? "Resultado" : "Total";
   const title = naturalCritical
-    ? `✨ Acerto crítico — ${label}`
+    ? `${CRITICAL_EMOJI} Acerto Crítico!`
     : naturalFailure
-      ? `☠️ Falha crítica — ${label}`
-      : `🎲 ${label}`;
+      ? `${FAILURE_EMOJI} Falha Crítica!!`
+      : `${DESTINY_EMOJI} ${label}`;
 
   return {
     embeds: [{

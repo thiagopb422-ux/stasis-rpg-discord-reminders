@@ -81,6 +81,12 @@ aleatoriedade criptográfica e gera uma URL curta assinada para a imagem. A rota
 de imagem combina os arquivos RGBA estáticos e entrega um PNG com cache
 imutável; ela não consulta o Firebase e não depende do cron.
 
+No embed, uma rolagem comum sem título usa o emoji `d203` e a mensagem
+`O Destino Diz ...`; títulos informados após `@` continuam substituindo essa
+mensagem. Um D20 natural 20 usa o emoji `critico`, título `Acerto Crítico!` e
+borda dourada. Um D20 natural 1 usa `veneno`, título `Falha Crítica!!` e borda
+vermelha. Os três emojis são referenciados pelos IDs do servidor, não por texto.
+
 O conjunto visual `polyhedral_3d_blue_and_white` veio do DiscordDiceBot. Créditos
 e licença estão preservados em `THIRD_PARTY_LICENSES`.
 
