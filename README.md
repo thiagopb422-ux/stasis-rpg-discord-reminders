@@ -76,7 +76,7 @@ aplicação antes de qualquer rolagem. O comando aceita, por exemplo:
 - `3d20+1d8@Ataque combinado`
 - `d100@Descoberta de Tesouro`
 
-São permitidos até quatro dados somados entre todas as categorias por comando (ou dois D100). O resultado usa
+São permitidos até seis dados somados entre todas as categorias por comando, inclusive D100. O resultado usa
 aleatoriedade criptográfica e gera uma URL curta assinada para a imagem. A rota
 de imagem combina os arquivos RGBA estáticos e entrega um PNG com cache
 imutável; ela não consulta o Firebase e não depende do cron.
@@ -85,15 +85,18 @@ O conjunto visual `polyhedral_3d_blue_and_white` veio do DiscordDiceBot. Crédit
 e licença estão preservados em `THIRD_PARTY_LICENSES`.
 
 O conjunto padrão é o `Cósmico`: D4, D6, D8, D10, D12 e D20 possuem faces próprias em
-`public/dice/source/cosmic-compact` e derivados RGBA em `public/dice/raw/cosmic`;
-o D100 é representado por dois D10 Cósmicos, para dezenas e unidades. `/personalizar` permite ao usuário alternar entre `Cósmico` e
-`Azul`, com persistência gratuita no KV. A rota pública `/dice/combat-roll`
+`public/dice/source/cosmic-compact` e derivados RGBA em `public/dice/raw/cosmic`.
+O conjunto completo `Redpill` segue o mesmo contrato em `redpill-compact` e
+`raw/redpill`. Em ambos, o D100 é representado por dois D10 para dezenas e
+unidades. `/personalizar` permite ao usuário alternar entre `Cósmico`, `Redpill`
+e `Azul`, com persistência gratuita no KV. A rota pública `/dice/combat-roll`
 fornece o D20 seguro do battlemap e mantém no Firestore somente as 20 rolagens
 recentes de cada mesa ativa.
 
 As faces compactas usam conteúdo máximo de 84 × 84 dentro de uma tela transparente
 de 100 × 100. `scripts/validate_cosmic_assets.py` garante dimensões, derivados RGBA
-e pelo menos oito pixels de margem, evitando cortes na composição do Discord. Os
+e pelo menos oito pixels de margem nos conjuntos Cósmico e Redpill, evitando cortes
+na composição do Discord. Os
 extratores também validam o maior componente de cada célula antes da compactação;
 se uma divisão da folha atravessar um dado, a geração falha em vez de publicar uma
 face aparentemente segura que já nasceu incompleta.

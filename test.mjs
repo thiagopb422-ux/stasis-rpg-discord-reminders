@@ -33,7 +33,13 @@ assert.deepEqual(parsedDice, {
   modifier: 3,
   title: 'Dano da Espada',
 })
-assert.throws(() => parseDiceNotation('9d20@Excesso'), /runas não reconheceram/i)
+assert.deepEqual(parseDiceNotation('6d6'), {
+  quantity: 6,
+  sides: 6,
+  modifier: 0,
+  title: '',
+})
+assert.throws(() => parseDiceNotation('7d6@Excesso'), /runas não reconheceram/i)
 assert.throws(() => parseDiceNotation('d7@Dado impossível'), /runas não reconheceram/i)
 assert.equal(parseDiceNotation('d8').sides, 8)
 assert.equal(parseDiceNotation('D8').sides, 8)
@@ -48,8 +54,9 @@ assert.deepEqual(mixedParsedDice, {
   modifier: 0,
   title: 'Ataque combinado',
 })
-assert.throws(() => parseDiceNotation('3d20+2d8'), /quatro dados/i)
-assert.throws(() => parseDiceNotation('d20-1d8'), /quatro dados/i)
+assert.equal(parseDiceNotation('3d20+2d8').groups.reduce((sum, group) => sum + group.quantity, 0), 5)
+assert.throws(() => parseDiceNotation('3d20+4d8'), /seis dados/i)
+assert.throws(() => parseDiceNotation('d20-1d8'), /seis dados/i)
 
 const deterministicRoll = rollDice(parsedDice, (() => {
   const values = [4, 6]
@@ -104,6 +111,13 @@ const composedDice = await composeDiceImage(dicePieces, async (_piece, index) =>
 assert.deepEqual(Array.from(composedDice.slice(0, 8)), [137, 80, 78, 71, 13, 10, 26, 10])
 assert.equal(new DataView(composedDice.buffer, composedDice.byteOffset).getUint32(16), 208)
 assert.equal(new DataView(composedDice.buffer, composedDice.byteOffset).getUint32(20), 100)
+
+const sixDice = await composeDiceImage(
+  Array.from({ length: 6 }, () => ({ die: 'd6', face: 6 })),
+  async () => flatFace(190, 35, 35),
+)
+assert.equal(new DataView(sixDice.buffer, sixDice.byteOffset).getUint32(16), 316)
+assert.equal(new DataView(sixDice.buffer, sixDice.byteOffset).getUint32(20), 208)
 
 const diceImageRequest = new Request(`https://dice.stasis.test${signedDicePath}`)
 const renderedDiceResponse = await renderDiceImage(diceImageRequest, {
@@ -211,24 +225,48 @@ assert.deepEqual(requestedD100Assets, [
   '/dice/raw/cosmic/d10/d10s7.rgba',
 ])
 
+const redpillPath = await createDiceImagePath(
+  [{ die: 'd100', face: 3 }, { die: 'd10', face: 7 }, { die: 'd6', face: 6 }],
+  diceImageSecret,
+  'redpill',
+)
+const requestedRedpillAssets = []
+const redpillResponse = await renderDiceImage(
+  new Request(`https://dice.stasis.test${redpillPath}`),
+  {
+    DICE_IMAGE_SECRET: diceImageSecret,
+    ASSETS: {
+      fetch: async (request) => {
+        requestedRedpillAssets.push(new URL(request.url).pathname)
+        return new Response(flatFace(180, 35, 35))
+      },
+    },
+  },
+)
+assert.equal(redpillResponse.status, 200)
+assert.deepEqual(requestedRedpillAssets, [
+  '/dice/raw/redpill/d10/d10s3.rgba',
+  '/dice/raw/redpill/d10/d10s7.rgba',
+  '/dice/raw/redpill/d6/d6s6.rgba',
+])
+
 const criticalInteraction = await diceInteractionPayload({
   data: { options: [{ name: 'rolagem', value: 'd20@Lance de Percepção' }] },
   member: { nick: 'Aventureiro', user: { username: 'jogador' } },
 }, 'https://dice.stasis.test', diceImageSecret, () => 20)
 assert.equal(criticalInteraction.content, undefined)
-assert.equal(criticalInteraction.embeds[0].description, '**D20**')
+assert.equal(criticalInteraction.embeds[0].description, '**D20**  •  Resultado: **20**')
 assert.equal(JSON.stringify(criticalInteraction).includes('Aventureiro'), false)
 assert.equal(criticalInteraction.embeds[0].title.includes('Acerto crítico'), true)
 assert.equal(criticalInteraction.embeds[0].image.url.startsWith('https://dice.stasis.test/dice/image/'), true)
-assert.equal(criticalInteraction.embeds[0].footer.text, 'Resultado: 20')
+assert.equal(criticalInteraction.embeds[0].footer, undefined)
 
 const modifiedInteraction = await diceInteractionPayload({
   data: { options: [{ name: 'rolagem', value: 'd20+5@Percepção' }] },
 }, 'https://dice.stasis.test', diceImageSecret, () => 11)
-assert.equal(modifiedInteraction.embeds[0].footer.text, 'Dados: 11 + 5')
-assert.deepEqual(modifiedInteraction.embeds[0].fields, [
-  { name: 'TOTAL', value: '**16**', inline: true },
-])
+assert.equal(modifiedInteraction.embeds[0].description, '**D20+5**  •  Total: **16**')
+assert.equal(modifiedInteraction.embeds[0].footer, undefined)
+assert.equal(modifiedInteraction.embeds[0].fields, undefined)
 
 const mixedInteraction = await diceInteractionPayload({
   data: { options: [{ name: 'rolagem', value: '3d20 + 1d8' }] },
@@ -236,23 +274,26 @@ const mixedInteraction = await diceInteractionPayload({
   const values = [11, 12, 13, 5]
   return () => values.shift()
 })())
-assert.equal(mixedInteraction.embeds[0].description, '**3D20+D8**')
-assert.equal(mixedInteraction.embeds[0].footer.text, 'Dados: 11 + 12 + 13 + 5')
-assert.deepEqual(mixedInteraction.embeds[0].fields, [
-  { name: 'TOTAL', value: '**41**', inline: true },
-])
+assert.equal(mixedInteraction.embeds[0].description, '**3D20+D8**  •  Total: **41**')
+assert.equal(mixedInteraction.embeds[0].footer, undefined)
+assert.equal(mixedInteraction.embeds[0].fields, undefined)
 
 const blueInteraction = await diceInteractionPayload({
   data: { options: [{ name: 'rolagem', value: 'd20' }] },
 }, 'https://dice.stasis.test', diceImageSecret, () => 8, 'blue')
 const blueSignedUrl = new URL(blueInteraction.embeds[0].image.url)
 assert.equal((await readSignedDiceImagePath(blueSignedUrl.pathname, diceImageSecret)).style, 'blue')
+assert.equal(normalizeDiceStyle('redpill'), 'redpill')
 
 const personalizeInteraction = await personalizeDiceInteractionPayload({
   data: { options: [{ name: 'estilo', value: 'cosmic' }] },
 }, 'https://dice.stasis.test', diceImageSecret)
 assert.equal(personalizeInteraction.flags, 64)
 assert.equal(personalizeInteraction.embeds[0].title.includes('Cósmico'), true)
+const redpillPersonalizeInteraction = await personalizeDiceInteractionPayload({
+  data: { options: [{ name: 'estilo', value: 'redpill' }] },
+}, 'https://dice.stasis.test', diceImageSecret)
+assert.equal(redpillPersonalizeInteraction.embeds[0].title.includes('Redpill'), true)
 
 const combatHistory = appendCombatDiceHistory([
   { id: 'anterior', result: 7, createdAt: '2026-08-26T12:00:00.000Z' },

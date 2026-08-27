@@ -1,11 +1,12 @@
 const SUPPORTED_DICE = new Set([4, 6, 8, 10, 12, 20, 100]);
-const MAX_DICE_PER_ROLL = 4;
+const MAX_DICE_PER_ROLL = 6;
 const DICE_EMOJI = "<:d20:1537217597077200997>";
 const DEFAULT_EMBED_COLOR = 0x315bd6;
 const CRITICAL_EMBED_COLOR = 0xd3a64a;
 const FAILURE_EMBED_COLOR = 0x9f2f3f;
-const DICE_STYLES = new Set(["cosmic", "blue"]);
-const COSMIC_DICE = new Set(["d4", "d6", "d8", "d10", "d12", "d20"]);
+const DICE_STYLES = new Set(["cosmic", "redpill", "blue"]);
+const COMPLETE_DICE_STYLES = new Set(["cosmic", "redpill"]);
+const CUSTOM_DICE = new Set(["d4", "d6", "d8", "d10", "d12", "d20"]);
 const textEncoder = new TextEncoder();
 
 export function normalizeDiceStyle(value) {
@@ -23,7 +24,7 @@ function safeText(value, max = 100) {
 }
 
 function notationError() {
-  return new Error("As runas não reconheceram essa rolagem. Use `d20`, `2d6`, `d8+3` ou misture até quatro dados como `3d20+1d8`; acrescente um título opcional depois de `@`.");
+  return new Error("As runas não reconheceram essa rolagem. Use `d20`, `6d6`, `d8+3` ou misture até seis dados como `3d20+3d8`; acrescente um título opcional depois de `@`.");
 }
 
 export function parseDiceNotation(value) {
@@ -57,8 +58,7 @@ export function parseDiceNotation(value) {
   }
   const groups = Array.from(grouped, ([sides, quantity]) => ({ quantity, sides }));
   const quantity = groups.reduce((sum, group) => sum + group.quantity, 0);
-  const d100Quantity = groups.find((group) => group.sides === 100)?.quantity || 0;
-  if (!groups.length || quantity > MAX_DICE_PER_ROLL || d100Quantity > 2 || Math.abs(modifier) > 999)
+  if (!groups.length || quantity > MAX_DICE_PER_ROLL || Math.abs(modifier) > 999)
     throw notationError();
   if (groups.length === 1)
     return { quantity: groups[0].quantity, sides: groups[0].sides, modifier, title };
@@ -240,20 +240,28 @@ export async function encodeRgbaPng(width, height, rgba) {
 export async function composeDiceImage(pieces, loadFace) {
   const size = 100;
   const gap = 8;
-  const width = (pieces.length * size) + ((pieces.length - 1) * gap);
-  const rgba = new Uint8Array(width * size * 4);
+  const columns = pieces.length <= 4 ? pieces.length : pieces.length <= 6 ? 3 : 4;
+  const rows = Math.ceil(pieces.length / columns);
+  const width = (columns * size) + ((columns - 1) * gap);
+  const height = (rows * size) + ((rows - 1) * gap);
+  const rgba = new Uint8Array(width * height * 4);
   const faces = await Promise.all(pieces.map(loadFace));
   faces.forEach((face, faceIndex) => {
     if (!(face instanceof Uint8Array) || face.length !== size * size * 4)
       throw new Error("Uma face dos dados não pôde ser carregada.");
-    const x = faceIndex * (size + gap);
-    for (let row = 0; row < size; row += 1) {
-      const sourceStart = row * size * 4;
-      const targetStart = ((row * width) + x) * 4;
+    const row = Math.floor(faceIndex / columns);
+    const column = faceIndex % columns;
+    const itemsInRow = Math.min(columns, pieces.length - (row * columns));
+    const rowWidth = (itemsInRow * size) + ((itemsInRow - 1) * gap);
+    const x = Math.floor((width - rowWidth) / 2) + (column * (size + gap));
+    const y = row * (size + gap);
+    for (let pixelRow = 0; pixelRow < size; pixelRow += 1) {
+      const sourceStart = pixelRow * size * 4;
+      const targetStart = ((((y + pixelRow) * width) + x) * 4);
       rgba.set(face.subarray(sourceStart, sourceStart + (size * 4)), targetStart);
     }
   });
-  return encodeRgbaPng(width, size, rgba);
+  return encodeRgbaPng(width, height, rgba);
 }
 
 export async function renderDiceImage(request, env) {
@@ -261,14 +269,17 @@ export async function renderDiceImage(request, env) {
   if (!signed) return new Response("A visão desta rolagem se dissipou.", { status: 404 });
   const { pieces, style } = signed;
   if (!env.ASSETS?.fetch) return new Response("As faces dos dados não estão disponíveis.", { status: 503 });
-  const assetPiece = (piece) => style === "cosmic" && piece.die === "d100"
+  const assetPiece = (piece) => COMPLETE_DICE_STYLES.has(style) && piece.die === "d100"
     ? { ...piece, die: "d10" }
     : piece;
-  const assetStyle = (piece) => style === "cosmic" && COSMIC_DICE.has(assetPiece(piece).die) ? "cosmic" : "blue";
+  const assetStyle = (piece) => COMPLETE_DICE_STYLES.has(style) && CUSTOM_DICE.has(assetPiece(piece).die)
+    ? style
+    : "blue";
   try {
     if (pieces.length === 1) {
       const piece = assetPiece(pieces[0]);
-      const sourceStyle = assetStyle(piece) === "cosmic" ? "cosmic-compact" : "blue";
+      const selectedStyle = assetStyle(piece);
+      const sourceStyle = selectedStyle === "blue" ? "blue" : `${selectedStyle}-compact`;
       const assetUrl = new URL(`/dice/source/${sourceStyle}/${piece.die}/${piece.die}s${piece.face}.png`, request.url);
       const asset = await env.ASSETS.fetch(new Request(assetUrl));
       if (!asset.ok) throw new Error(`Face ${piece.die}/${piece.face} ausente.`);
@@ -283,9 +294,9 @@ export async function renderDiceImage(request, env) {
       const selectedPiece = assetPiece(piece);
       const faceStyle = assetStyle(selectedPiece);
       const assetUrl = new URL(
-        faceStyle === "cosmic"
-          ? `/dice/raw/cosmic/${selectedPiece.die}/${selectedPiece.die}s${selectedPiece.face}.rgba`
-          : `/dice/raw/${selectedPiece.die}/${selectedPiece.die}s${selectedPiece.face}.rgba`,
+        faceStyle === "blue"
+          ? `/dice/raw/${selectedPiece.die}/${selectedPiece.die}s${selectedPiece.face}.rgba`
+          : `/dice/raw/${faceStyle}/${selectedPiece.die}/${selectedPiece.die}s${selectedPiece.face}.rgba`,
         request.url,
       );
       const response = await env.ASSETS.fetch(new Request(assetUrl));
@@ -315,13 +326,6 @@ function canonicalNotation(result) {
   return `${dice}${modifier}`;
 }
 
-function resultFooter(result) {
-  const dice = result.rolls.join(" + ");
-  if (!result.modifier && result.rolls.length === 1) return `Resultado: ${result.total}`;
-  const modifier = result.modifier ? ` ${result.modifier > 0 ? "+" : "−"} ${Math.abs(result.modifier)}` : "";
-  return `Dados: ${dice}${modifier}`;
-}
-
 export async function diceInteractionPayload(interaction, origin, secret, die = secureDie, style = "cosmic") {
   const option = interaction?.data?.options?.find((item) => item.name === "rolagem");
   const parsed = parseDiceNotation(option?.value);
@@ -330,7 +334,7 @@ export async function diceInteractionPayload(interaction, origin, secret, die = 
   const naturalCritical = result.diceRolls.length === 1 && result.diceRolls[0].sides === 20 && result.rolls[0] === 20;
   const naturalFailure = result.diceRolls.length === 1 && result.diceRolls[0].sides === 20 && result.rolls[0] === 1;
   const label = result.title || "Rolagem de Dados";
-  const showTotalField = Boolean(result.modifier) || result.rolls.length > 1;
+  const resultLabel = result.rolls.length === 1 && !result.modifier ? "Resultado" : "Total";
   const title = naturalCritical
     ? `✨ Acerto crítico — ${label}`
     : naturalFailure
@@ -340,13 +344,9 @@ export async function diceInteractionPayload(interaction, origin, secret, die = 
   return {
     embeds: [{
       title,
-      description: `**${canonicalNotation(result)}**`,
+      description: `**${canonicalNotation(result)}**  •  ${resultLabel}: **${result.total}**`,
       color: naturalCritical ? CRITICAL_EMBED_COLOR : naturalFailure ? FAILURE_EMBED_COLOR : DEFAULT_EMBED_COLOR,
       image: { url: `${String(origin).replace(/\/$/, "")}${imagePath}` },
-      ...(showTotalField ? {
-        fields: [{ name: "TOTAL", value: `**${result.total}**`, inline: true }],
-      } : {}),
-      footer: { text: resultFooter(result) },
     }],
     allowed_mentions: { parse: [] },
   };
@@ -356,15 +356,29 @@ export async function personalizeDiceInteractionPayload(interaction, origin, sec
   const selected = interaction?.data?.options?.find((item) => item.name === "estilo")?.value;
   const style = normalizeDiceStyle(selected);
   const imagePath = await createDiceImagePath([{ die: "d20", face: 20 }], secret, style);
-  const label = style === "blue" ? "Azul" : "Cósmico";
+  const presentation = {
+    cosmic: {
+      label: "Cósmico",
+      description: "Este é o padrão completo do Stasis. D4, D6, D8, D10, D12, D20 e D100 usam a arte Cósmica.",
+      color: 0x7b4fd5,
+    },
+    redpill: {
+      label: "Redpill",
+      description: "D4, D6, D8, D10, D12, D20 e D100 agora usam o conjunto Redpill completo.",
+      color: 0xc92f2f,
+    },
+    blue: {
+      label: "Azul",
+      description: "Todas as suas rolagens voltaram a usar o conjunto clássico azul.",
+      color: DEFAULT_EMBED_COLOR,
+    },
+  }[style];
   return {
     flags: 64,
     embeds: [{
-      title: `✨ Conjunto ${label} selecionado`,
-      description: style === "cosmic"
-        ? "Este é o padrão completo do Stasis. D4, D6, D8, D10, D12, D20 e D100 usam a arte Cósmica."
-        : "Todas as suas rolagens voltaram a usar o conjunto clássico azul.",
-      color: style === "cosmic" ? 0x7b4fd5 : DEFAULT_EMBED_COLOR,
+      title: `✨ Conjunto ${presentation.label} selecionado`,
+      description: presentation.description,
+      color: presentation.color,
       thumbnail: { url: `${String(origin).replace(/\/$/, "")}${imagePath}` },
       footer: { text: "A escolha fica salva para as próximas rolagens." },
     }],
@@ -402,7 +416,7 @@ export const DICE_COMMAND_DEFINITION = {
   description: "Role os dados do Stasis RPG",
   options: [{
     name: "rolagem",
-    description: "Misture até 4 dados. Ex.: 3d20+1d8 ou d20+5@Percepção",
+    description: "Misture até 6 dados. Ex.: 3d20+3d8 ou d20+5@Percepção",
     type: 3,
     required: true,
     min_length: 2,
@@ -421,6 +435,7 @@ export const DICE_PERSONALIZE_COMMAND_DEFINITION = {
     required: true,
     choices: [
       { name: "Cósmico (padrão)", value: "cosmic" },
+      { name: "Redpill", value: "redpill" },
       { name: "Azul", value: "blue" },
     ],
   }],
