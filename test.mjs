@@ -102,11 +102,12 @@ assert.equal(await readSignedDiceImagePath(signedDicePath.replace('.png', 'x.png
 assert.equal(normalizeDiceStyle('blue'), 'blue')
 assert.equal(normalizeDiceStyle('qualquer-coisa'), 'cosmic')
 
-const flatFace = (red, green, blue) => {
-  const face = new Uint8Array(100 * 100 * 4)
+const flatFaceSized = (size, red, green, blue) => {
+  const face = new Uint8Array(size * size * 4)
   for (let index = 0; index < face.length; index += 4) face.set([red, green, blue, 255], index)
   return face
 }
+const flatFace = (red, green, blue) => flatFaceSized(100, red, green, blue)
 const composedDice = await composeDiceImage(dicePieces, async (_piece, index) => index ? flatFace(0, 0, 255) : flatFace(255, 0, 0))
 assert.deepEqual(Array.from(composedDice.slice(0, 8)), [137, 80, 78, 71, 13, 10, 26, 10])
 assert.equal(new DataView(composedDice.buffer, composedDice.byteOffset).getUint32(16), 208)
@@ -118,6 +119,14 @@ const sixDice = await composeDiceImage(
 )
 assert.equal(new DataView(sixDice.buffer, sixDice.byteOffset).getUint32(16), 316)
 assert.equal(new DataView(sixDice.buffer, sixDice.byteOffset).getUint32(20), 208)
+
+const beginsPair = await composeDiceImage(
+  [{ die: 'd6', face: 1 }, { die: 'd6', face: 2 }],
+  async () => flatFaceSized(125, 42, 76, 170),
+  125,
+)
+assert.equal(new DataView(beginsPair.buffer, beginsPair.byteOffset).getUint32(16), 260)
+assert.equal(new DataView(beginsPair.buffer, beginsPair.byteOffset).getUint32(20), 125)
 
 const diceImageRequest = new Request(`https://dice.stasis.test${signedDicePath}`)
 const renderedDiceResponse = await renderDiceImage(diceImageRequest, {
@@ -265,6 +274,33 @@ for (const style of ['eniripsa', 'begins']) {
   assert.equal(response.status, 200)
   assert.equal(requestedAsset, `/dice/source/${style}-compact/d20/d20s20.png`)
 }
+
+const beginsPairPath = await createDiceImagePath(
+  [{ die: 'd6', face: 1 }, { die: 'd6', face: 2 }],
+  diceImageSecret,
+  'begins',
+)
+const requestedBeginsPairAssets = []
+const beginsPairResponse = await renderDiceImage(
+  new Request(`https://dice.stasis.test${beginsPairPath}`),
+  {
+    DICE_IMAGE_SECRET: diceImageSecret,
+    ASSETS: {
+      fetch: async (request) => {
+        requestedBeginsPairAssets.push(new URL(request.url).pathname)
+        return new Response(flatFaceSized(125, 42, 76, 170))
+      },
+    },
+  },
+)
+assert.equal(beginsPairResponse.status, 200)
+assert.deepEqual(requestedBeginsPairAssets, [
+  '/dice/raw/begins/d6/d6s1.rgba',
+  '/dice/raw/begins/d6/d6s2.rgba',
+])
+const beginsPairPng = new Uint8Array(await beginsPairResponse.arrayBuffer())
+assert.equal(new DataView(beginsPairPng.buffer, beginsPairPng.byteOffset).getUint32(16), 260)
+assert.equal(new DataView(beginsPairPng.buffer, beginsPairPng.byteOffset).getUint32(20), 125)
 
 const criticalInteraction = await diceInteractionPayload({
   data: { options: [{ name: 'rolagem', value: 'd20@Lance de Percepção' }] },

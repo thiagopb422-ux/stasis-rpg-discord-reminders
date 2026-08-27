@@ -133,7 +133,7 @@ async function hmac(secret, value) {
 export async function createDiceImagePath(pieces, secret, style = "cosmic") {
   if (!secret) throw new Error("A chave das imagens de dados não está configurada.");
   const payload = bytesToBase64Url(textEncoder.encode(JSON.stringify({
-    version: 8,
+    version: 9,
     style: normalizeDiceStyle(style),
     pieces,
   })));
@@ -166,7 +166,7 @@ export async function readSignedDiceImagePath(pathname, secret) {
   if (!constantTimeEqual(expected, match[2])) return null;
   try {
     const data = JSON.parse(new TextDecoder().decode(base64UrlToBytes(match[1])));
-    if (![1, 2, 3, 4, 5, 6, 7, 8].includes(data?.version) || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
+    if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(data?.version) || !Array.isArray(data.pieces) || data.pieces.length < 1 || data.pieces.length > 16)
       return null;
     if (!data.pieces.every(validPiece)) return null;
     return {
@@ -237,9 +237,8 @@ export async function encodeRgbaPng(width, height, rgba) {
   ]);
 }
 
-export async function composeDiceImage(pieces, loadFace) {
-  const size = 100;
-  const gap = 8;
+export async function composeDiceImage(pieces, loadFace, size = 100) {
+  const gap = Math.max(8, Math.round(size * 0.08));
   const columns = pieces.length <= 4 ? pieces.length : pieces.length <= 6 ? 3 : 4;
   const rows = Math.ceil(pieces.length / columns);
   const width = (columns * size) + ((columns - 1) * gap);
@@ -275,6 +274,7 @@ export async function renderDiceImage(request, env) {
   const assetStyle = (piece) => COMPLETE_DICE_STYLES.has(style) && CUSTOM_DICE.has(assetPiece(piece).die)
     ? style
     : "blue";
+  const faceSize = style === "begins" ? 125 : 100;
   try {
     if (pieces.length === 1) {
       const piece = assetPiece(pieces[0]);
@@ -302,7 +302,7 @@ export async function renderDiceImage(request, env) {
       const response = await env.ASSETS.fetch(new Request(assetUrl));
       if (!response.ok) throw new Error(`Face ${piece.die}/${piece.face} ausente.`);
       return new Uint8Array(await response.arrayBuffer());
-    });
+    }, faceSize);
     return new Response(png, {
       headers: {
         "content-type": "image/png",

@@ -11,17 +11,19 @@ from PIL import Image, ImageDraw
 
 
 EXPECTED = {"d4": 4, "d6": 6, "d8": 8, "d10": 10, "d12": 12, "d20": 20}
-FACE_MAX_SIZE = 84
+DEFAULT_CANVAS_SIZE = 100
+DEFAULT_FACE_MAX_SIZE = 84
+STYLE_SIZES = {"begins": (125, 105)}
 SOURCE_PATTERN = re.compile(r"^d(20|12|10|8|6|4)(\d{2})\.png$", re.IGNORECASE)
 
 
-def normalize_face(source: Image.Image) -> Image.Image:
+def normalize_face(source: Image.Image, canvas_size: int, face_max_size: int) -> Image.Image:
     face = source.convert("RGBA")
     # Keep the complete source canvas: several Redpill faces contain smoke,
     # accessories or unusually wide geometry that must not be cropped away.
-    face.thumbnail((FACE_MAX_SIZE, FACE_MAX_SIZE), Image.Resampling.LANCZOS)
-    canvas = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
-    canvas.alpha_composite(face, ((100 - face.width) // 2, (100 - face.height) // 2))
+    face.thumbnail((face_max_size, face_max_size), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    canvas.alpha_composite(face, ((canvas_size - face.width) // 2, (canvas_size - face.height) // 2))
     return canvas
 
 
@@ -45,10 +47,15 @@ def save_face(face: Image.Image, die: str, value: int, root: Path, style: str) -
     (raw_dir / f"{die}s{value}.rgba").write_bytes(face.tobytes())
 
 
-def save_preview(faces: dict[tuple[str, int], Image.Image], path: Path, style: str) -> None:
+def save_preview(
+    faces: dict[tuple[str, int], Image.Image],
+    path: Path,
+    style: str,
+    canvas_size: int,
+) -> None:
     columns = 10
-    cell_width = 112
-    cell_height = 126
+    cell_width = canvas_size + 12
+    cell_height = canvas_size + 26
     rows = sum((count + columns - 1) // columns for count in EXPECTED.values())
     backgrounds = {
         "redpill": (12, 5, 7, 255),
@@ -83,6 +90,10 @@ def main() -> None:
     style = args.style.strip().lower()
     if not re.fullmatch(r"[a-z][a-z0-9-]{1,31}", style):
         raise ValueError("O identificador visual deve usar apenas letras minúsculas, números ou hífen.")
+    canvas_size, face_max_size = STYLE_SIZES.get(
+        style,
+        (DEFAULT_CANVAS_SIZE, DEFAULT_FACE_MAX_SIZE),
+    )
 
     source_paths = sorted(args.source.glob("*.png"))
     parsed: dict[tuple[str, int], Path] = {}
@@ -104,13 +115,16 @@ def main() -> None:
         archived = archive / path.name
         if path.resolve() != archived.resolve():
             shutil.copy2(path, archived)
-        face = normalize_face(Image.open(path))
+        face = normalize_face(Image.open(path), canvas_size, face_max_size)
         save_face(face, die, value, args.root, style)
         faces[(die, value)] = face
 
     if args.preview:
-        save_preview(faces, args.preview, style)
-    print(f"Importadas 60 faces {style} em PNG/RGBA 100x100, sem corte e com proporção preservada.")
+        save_preview(faces, args.preview, style, canvas_size)
+    print(
+        f"Importadas 60 faces {style} em PNG/RGBA {canvas_size}x{canvas_size}, "
+        "sem corte e com proporção preservada."
+    )
 
 
 if __name__ == "__main__":

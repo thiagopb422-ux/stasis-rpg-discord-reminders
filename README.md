@@ -94,8 +94,10 @@ KV. A rota pública `/dice/combat-roll`
 fornece o D20 seguro do battlemap e mantém no Firestore somente as 20 rolagens
 recentes de cada mesa ativa.
 
-As faces compactas usam conteúdo máximo de 84 × 84 dentro de uma tela transparente
-de 100 × 100. `scripts/validate_cosmic_assets.py` garante dimensões, derivados RGBA
+As faces compactas de Cósmico, Redpill e Eniripsa usam conteúdo máximo de 84 × 84
+dentro de uma tela transparente de 100 × 100. O conjunto Begins é propositalmente
+25% maior: conteúdo máximo de 105 × 105 em uma tela de 125 × 125.
+`scripts/validate_cosmic_assets.py` garante dimensões, derivados RGBA
 e pelo menos oito pixels de margem nos quatro conjuntos completos, evitando cortes
 na composição do Discord. Os
 extratores também validam o maior componente de cada célula antes da compactação;
