@@ -320,13 +320,48 @@ export async function renderDiceImage(request, env) {
   }
 }
 
-function canonicalNotation(result) {
+export function canonicalNotation(result) {
   const modifier = result.modifier ? `${result.modifier > 0 ? "+" : ""}${result.modifier}` : "";
   const groups = result.groups || [{ quantity: result.quantity, sides: result.sides }];
   const dice = groups
     .map((group) => `${group.quantity > 1 ? group.quantity : ""}D${group.sides}`)
     .join("+");
   return `${dice}${modifier}`;
+}
+
+export async function createCombatDiceRoll(
+  notation,
+  style,
+  origin,
+  secret,
+  die = secureDie,
+  id = crypto.randomUUID(),
+  createdAt = new Date().toISOString(),
+) {
+  const parsed = parseDiceNotation(notation || "d20");
+  const result = rollDice(parsed, die);
+  const normalizedStyle = normalizeDiceStyle(style);
+  const imagePath = await createDiceImagePath(
+    diceImagePieces(result),
+    secret,
+    normalizedStyle,
+  );
+  const naturalCritical = result.diceRolls.length === 1 &&
+    result.diceRolls[0].sides === 20 && result.rolls[0] === 20;
+  const naturalFailure = result.diceRolls.length === 1 &&
+    result.diceRolls[0].sides === 20 && result.rolls[0] === 1;
+  return {
+    id,
+    result: result.total,
+    notation: canonicalNotation(result),
+    title: result.title,
+    style: normalizedStyle,
+    modifier: result.modifier,
+    dice: result.diceRolls,
+    outcome: naturalCritical ? "critical" : naturalFailure ? "failure" : "normal",
+    imageUrl: `${String(origin).replace(/\/$/, "")}${imagePath}`,
+    createdAt,
+  };
 }
 
 export async function diceInteractionPayload(interaction, origin, secret, die = secureDie, style = "cosmic") {

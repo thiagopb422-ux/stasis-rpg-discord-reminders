@@ -14,6 +14,7 @@ import {
 } from './src/index.js'
 import {
   composeDiceImage,
+  createCombatDiceRoll,
   createDiceImagePath,
   diceImagePieces,
   diceInteractionPayload,
@@ -370,8 +371,55 @@ const combatHistory = appendCombatDiceHistory([
 ], { id: 'novo', result: 20, createdAt: '2026-08-26T12:01:00.000Z' }, 2)
 assert.deepEqual(combatHistory.map((item) => item.result), [20, 7])
 assert.equal(appendCombatDiceHistory(combatHistory, {
-  id: 'invalido', result: 21, createdAt: '2026-08-26T12:02:00.000Z',
-}).some((item) => item.result === 21), false)
+  id: 'invalido', result: 10000, createdAt: '2026-08-26T12:02:00.000Z',
+}).some((item) => item.result === 10000), false)
+
+const combatOracleRoll = await createCombatDiceRoll(
+  '3d20+1d8+5@Investida final',
+  'redpill',
+  'https://dice.stasis.test',
+  diceImageSecret,
+  (() => {
+    const values = [20, 7, 11, 6]
+    return () => values.shift()
+  })(),
+  'rolagem-da-mesa',
+  '2026-08-27T01:00:00.000Z',
+)
+assert.deepEqual(combatOracleRoll, {
+  id: 'rolagem-da-mesa',
+  result: 49,
+  notation: '3D20+D8+5',
+  title: 'Investida final',
+  style: 'redpill',
+  modifier: 5,
+  dice: [
+    { sides: 20, value: 20 },
+    { sides: 20, value: 7 },
+    { sides: 20, value: 11 },
+    { sides: 8, value: 6 },
+  ],
+  outcome: 'normal',
+  imageUrl: combatOracleRoll.imageUrl,
+  createdAt: '2026-08-27T01:00:00.000Z',
+})
+assert.equal(combatOracleRoll.imageUrl.startsWith('https://dice.stasis.test/dice/image/'), true)
+assert.equal((await readSignedDiceImagePath(new URL(combatOracleRoll.imageUrl).pathname, diceImageSecret)).style, 'redpill')
+
+const combatCritical = await createCombatDiceRoll(
+  'd20@Ataque', 'begins', 'https://dice.stasis.test', diceImageSecret,
+  () => 20, 'critico-da-mesa', '2026-08-27T01:01:00.000Z',
+)
+assert.equal(combatCritical.outcome, 'critical')
+assert.equal(combatCritical.result, 20)
+assert.equal(combatCritical.style, 'begins')
+
+const combatFailure = await createCombatDiceRoll(
+  'd20-2@Fuga', 'eniripsa', 'https://dice.stasis.test', diceImageSecret,
+  () => 1, 'falha-da-mesa', '2026-08-27T01:02:00.000Z',
+)
+assert.equal(combatFailure.outcome, 'failure')
+assert.equal(combatFailure.result, -1)
 
 const interactionKeys = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])
 const rawInteraction = JSON.stringify({ type: 1 })

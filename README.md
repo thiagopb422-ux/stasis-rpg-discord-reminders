@@ -96,9 +96,11 @@ Os conjuntos completos `Redpill`, `Eniripsa` e `Begins` seguem o mesmo contrato
 em suas pastas `*-compact` e `raw/*`. Neles, o D100 é representado por dois D10
 para dezenas e unidades. `/personalizar` permite ao usuário alternar entre
 `Cósmico`, `Redpill`, `Eniripsa`, `Begins` e `Azul`, com persistência gratuita no
-KV. A rota pública `/dice/combat-roll`
-fornece o D20 seguro do battlemap e mantém no Firestore somente as 20 rolagens
-recentes de cada mesa ativa.
+KV. A rota pública `/dice/combat-roll` também alimenta o Oráculo do battlemap:
+aceita as mesmas fórmulas, misturas, modificadores, títulos e cinco conjuntos
+visuais do bot, sorteia o resultado na nuvem e devolve a composição assinada das
+faces. O histórico compartilhado mantém no Firestore somente as 20 rolagens
+recentes de cada mesa ativa; as imagens continuam fora do banco.
 
 As faces compactas de Cósmico, Redpill e Eniripsa usam conteúdo máximo de 84 × 84
 dentro de uma tela transparente de 100 × 100. O conjunto Begins é propositalmente

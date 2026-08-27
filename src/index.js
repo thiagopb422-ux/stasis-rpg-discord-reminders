@@ -1,12 +1,12 @@
 import {
   DICE_COMMAND_DEFINITIONS,
+  createCombatDiceRoll,
   createDiceImagePath,
   diceInteractionError,
   diceInteractionPayload,
   normalizeDiceStyle,
   personalizeDiceInteractionPayload,
   renderDiceImage,
-  rollDice,
   verifyDiscordInteraction,
 } from "./dice.js";
 
@@ -351,13 +351,13 @@ export function appendCombatDiceHistory(history, roll, limit = 20) {
   return [roll, ...previous]
     .filter((item) =>
       item && Number.isInteger(Number(item.result)) &&
-      Number(item.result) >= 1 && Number(item.result) <= 20 &&
+      Number(item.result) >= -9999 && Number(item.result) <= 9999 &&
       typeof item.createdAt === "string",
     )
     .slice(0, Math.max(1, Math.min(50, Number(limit) || 20)));
 }
 
-async function rollPublicCombatD20(request, env) {
+async function rollPublicCombatDice(request, env) {
   try {
     const body = await request.json();
     const roomId = String(body?.combatId || "").trim();
@@ -367,23 +367,33 @@ async function rollPublicCombatD20(request, env) {
     const room = await getDocument(env, firebaseToken, "publicCombatRooms", roomId);
     if (!room || room.status !== "active")
       return publicJson(request, { ok: false, error: "Esta mesa não está mais ativa." }, 404);
-    const result = rollDice({ quantity: 1, sides: 20, modifier: 0, title: "" }).rolls[0];
     const now = new Date().toISOString();
+    const origin = new URL(request.url).origin;
+    const roll = await createCombatDiceRoll(
+      String(body?.notation || "d20").slice(0, 200),
+      body?.style,
+      origin,
+      env.DICE_IMAGE_SECRET,
+      undefined,
+      crypto.randomUUID(),
+      now,
+    );
     const history = await getDocument(env, firebaseToken, "combatDiceHistories", roomId);
-    const roll = { id: crypto.randomUUID(), result, createdAt: now };
     await patchDocument(env, firebaseToken, "combatDiceHistories", roomId, {
       roomId,
       rolls: appendCombatDiceHistory(history?.rolls, roll),
       updatedAt: now,
     }, history?._updateTime || "");
-    const origin = new URL(request.url).origin;
     return publicJson(request, {
       ok: true,
       roll,
-      imageUrl: `${origin}/dice/source/cosmic/d20/d20s${result}.png`,
+      imageUrl: roll.imageUrl,
     });
   } catch (error) {
-    console.error("public-combat-d20", error);
+    console.error("public-combat-dice", error);
+    const message = String(error?.message || "");
+    if (/runas não reconheceram|seis dados|dado/i.test(message))
+      return publicJson(request, { ok: false, error: message }, 400);
     return publicJson(request, {
       ok: false,
       error: "As energias do dado se dispersaram. Tente novamente em instantes.",
@@ -1171,9 +1181,9 @@ export default {
     if (url.pathname === "/dice/combat-roll" && request.method === "OPTIONS")
       return publicJson(request, { ok: true });
     if (url.pathname === "/dice/combat-roll" && request.method === "POST")
-      return rollPublicCombatD20(request, env);
+      return rollPublicCombatDice(request, env);
     if (url.pathname === "/health")
-      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-polls", "session-reminders", "direct-notifications", "submission-confirmations", "general-alerts", "visual-dice-command", "dice-personalization", "public-combat-d20", "redpill-dice-set", "eniripsa-dice-set", "begins-dice-set", "six-dice-rolls", "compact-dice-embed"] });
+      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-polls", "session-reminders", "direct-notifications", "submission-confirmations", "general-alerts", "visual-dice-command", "dice-personalization", "public-combat-dice-oracle", "redpill-dice-set", "eniripsa-dice-set", "begins-dice-set", "six-dice-rolls", "compact-dice-embed"] });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "OPTIONS")
       return publicJson(request, { ok: true });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "POST")
