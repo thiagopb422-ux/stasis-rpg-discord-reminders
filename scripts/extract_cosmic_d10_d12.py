@@ -10,14 +10,23 @@ from pathlib import Path
 from PIL import Image
 
 
-D10_X = (0, 372, 682, 989, 1302, 1640)
+DICE_SHEET_WIDTH = 1672
+DICE_SHEET_HEIGHT = 941
+
+# The uploaded sheet is 1672 x 941. These cuts sit in the transparent gaps
+# between complete dice instead of using a visually estimated equal grid.
+D10_X = (0, 369, 678, 998, 1301, 1672)
 D10_Y = (0, 221, 432)
-D12_X = (0, 309, 569, 833, 1102, 1366, 1640)
-D12_Y = (432, 666, 920)
+D12_X = (0, 312, 574, 837, 1102, 1367, 1672)
+D12_Y = (432, 665, 941)
 FACE_MAX_SIZE = 84
 
 
-def visible_bounds(image: Image.Image, threshold: int = 12) -> tuple[int, int, int, int]:
+def visible_bounds(
+    image: Image.Image,
+    threshold: int = 12,
+    padding: int = 3,
+) -> tuple[int, int, int, int]:
     alpha = image.getchannel("A")
     mask = alpha.point(lambda value: 255 if value > threshold else 0)
     pixels = mask.load()
@@ -52,7 +61,12 @@ def visible_bounds(image: Image.Image, threshold: int = 12) -> tuple[int, int, i
     if largest is None:
         raise ValueError("A célula não contém pixels visíveis.")
     _, left, top, right, bottom = largest
-    return max(0, left - 3), max(0, top - 3), min(image.width, right + 3), min(image.height, bottom + 3)
+    return (
+        max(0, left - padding),
+        max(0, top - padding),
+        min(image.width, right + padding),
+        min(image.height, bottom + padding),
+    )
 
 
 def compact_face(cell: Image.Image) -> Image.Image:
@@ -61,6 +75,16 @@ def compact_face(cell: Image.Image) -> Image.Image:
     canvas = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
     canvas.alpha_composite(face, ((100 - face.width) // 2, (100 - face.height) // 2))
     return canvas
+
+
+def ensure_complete_cell(cell: Image.Image, die: str, value: int, threshold: int = 32) -> None:
+    bounds = visible_bounds(cell, threshold=threshold, padding=0)
+    left, top, right, bottom = bounds
+    if left <= 0 or top <= 0 or right >= cell.width or bottom >= cell.height:
+        raise ValueError(
+            f"A face {die}={value} encosta no limite do recorte {bounds}/{cell.size}; "
+            "ajuste as divisões da folha antes de publicar."
+        )
 
 
 def save_face(face: Image.Image, die: str, value: int, root: Path) -> None:
@@ -85,7 +109,9 @@ def extract_grid(
     for row in range(len(y_edges) - 1):
         for column in range(len(x_edges) - 1):
             box = (x_edges[column], y_edges[row], x_edges[column + 1], y_edges[row + 1])
-            face = compact_face(sheet.crop(box))
+            cell = sheet.crop(box)
+            ensure_complete_cell(cell, die, values[index])
+            face = compact_face(cell)
             save_face(face, die, values[index], root)
             faces.append(face)
             index += 1
@@ -120,10 +146,10 @@ def main() -> None:
     if args.sheet.resolve() != saved_source.resolve():
         shutil.copy2(args.sheet, saved_source)
 
-    d10_x = scaled_edges(D10_X, sheet.width, 1640)
-    d10_y = scaled_edges(D10_Y, sheet.height, 920)
-    d12_x = scaled_edges(D12_X, sheet.width, 1640)
-    d12_y = scaled_edges(D12_Y, sheet.height, 920)
+    d10_x = scaled_edges(D10_X, sheet.width, DICE_SHEET_WIDTH)
+    d10_y = scaled_edges(D10_Y, sheet.height, DICE_SHEET_HEIGHT)
+    d12_x = scaled_edges(D12_X, sheet.width, DICE_SHEET_WIDTH)
+    d12_y = scaled_edges(D12_Y, sheet.height, DICE_SHEET_HEIGHT)
     d10 = extract_grid(sheet, "d10", d10_x, d10_y, [10, 1, 2, 3, 4, 5, 6, 7, 8, 9], args.root)
     d12 = extract_grid(sheet, "d12", d12_x, d12_y, list(range(1, 13)), args.root)
     if args.preview:

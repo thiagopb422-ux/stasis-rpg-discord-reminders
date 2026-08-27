@@ -316,8 +316,7 @@ async function setupDiscordDice(request, env) {
 
 export async function cosmicDicePreview(request, env) {
   const imagePath = await createDiceImagePath([
-    { die: "d8", face: 8 },
-    { die: "d10", face: 6 },
+    { die: "d6", face: 6 },
     { die: "d6", face: 6 },
   ], env.DICE_IMAGE_SECRET, "cosmic");
   const response = await renderDiceImage(new Request(new URL(imagePath, request.url)), env);
@@ -1174,7 +1173,7 @@ export default {
     if (url.pathname === "/dice/combat-roll" && request.method === "POST")
       return rollPublicCombatD20(request, env);
     if (url.pathname === "/health")
-      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-polls", "session-reminders", "direct-notifications", "submission-confirmations", "general-alerts", "visual-dice-command", "dice-personalization", "public-combat-d20", "cosmic-safe-margin-v7"] });
+      return json({ ok: true, service: "stasis-rpg-discord-automation", scheduler: "cloud", features: ["session-polls", "session-reminders", "direct-notifications", "submission-confirmations", "general-alerts", "visual-dice-command", "dice-personalization", "public-combat-d20", "cosmic-complete-recuts-v8"] });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "OPTIONS")
       return publicJson(request, { ok: true });
     if (url.pathname === "/general-alerts/unsubscribe" && request.method === "POST")

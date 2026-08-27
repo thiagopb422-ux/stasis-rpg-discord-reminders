@@ -93,7 +93,10 @@ recentes de cada mesa ativa.
 
 As faces compactas usam conteúdo máximo de 84 × 84 dentro de uma tela transparente
 de 100 × 100. `scripts/validate_cosmic_assets.py` garante dimensões, derivados RGBA
-e pelo menos oito pixels de margem, evitando cortes na composição do Discord.
+e pelo menos oito pixels de margem, evitando cortes na composição do Discord. Os
+extratores também validam o maior componente de cada célula antes da compactação;
+se uma divisão da folha atravessar um dado, a geração falha em vez de publicar uma
+face aparentemente segura que já nasceu incompleta.
 
 O usuário técnico `Stasis Reminder Service` possui acesso estritamente identificado
 nas regras do Firestore. Apenas ele pode mover notificações de `pending` para

@@ -8,15 +8,17 @@ from pathlib import Path
 
 from PIL import Image
 
-from extract_cosmic_d10_d12 import extract_grid, scaled_edges
+from extract_cosmic_d10_d12 import DICE_SHEET_HEIGHT, DICE_SHEET_WIDTH, extract_grid, scaled_edges
 
 
-D4_X = (0, 475, 839, 1204, 1640)
-D4_Y = (0, 310)
-D6_X = (0, 286, 565, 840, 1110, 1380, 1640)
-D6_Y = (310, 592)
-D8_X = (0, 219, 422, 625, 831, 1037, 1245, 1451, 1640)
-D8_Y = (592, 920)
+# Exact transparent-gap cuts from the original 1672 x 941 sheet. The former
+# estimated grid clipped the left side of D6 faces 4-6 and the later D8 faces.
+D4_X = (0, 472, 835, 1198, 1672)
+D4_Y = (0, 312)
+D6_X = (0, 300, 570, 834, 1099, 1369, 1672)
+D6_Y = (312, 598)
+D8_X = (0, 224, 432, 636, 837, 1041, 1245, 1450, 1672)
+D8_Y = (598, 941)
 
 
 def save_preview(groups: list[list[Image.Image]], path: Path) -> None:
@@ -55,8 +57,8 @@ def main() -> None:
         groups.append(extract_grid(
             sheet,
             die,
-            scaled_edges(x_edges, sheet.width, 1640),
-            scaled_edges(y_edges, sheet.height, 920),
+            scaled_edges(x_edges, sheet.width, DICE_SHEET_WIDTH),
+            scaled_edges(y_edges, sheet.height, DICE_SHEET_HEIGHT),
             values,
             args.root,
         ))
