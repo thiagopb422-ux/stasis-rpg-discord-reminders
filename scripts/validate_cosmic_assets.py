@@ -8,7 +8,7 @@ from PIL import Image
 
 
 EXPECTED = {"d4": 4, "d6": 6, "d8": 8, "d10": 10, "d12": 12, "d20": 20}
-STYLES = ("cosmic", "redpill")
+STYLES = ("cosmic", "redpill", "eniripsa", "begins")
 MINIMUM_MARGIN = 8
 
 

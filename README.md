@@ -86,16 +86,17 @@ e licença estão preservados em `THIRD_PARTY_LICENSES`.
 
 O conjunto padrão é o `Cósmico`: D4, D6, D8, D10, D12 e D20 possuem faces próprias em
 `public/dice/source/cosmic-compact` e derivados RGBA em `public/dice/raw/cosmic`.
-O conjunto completo `Redpill` segue o mesmo contrato em `redpill-compact` e
-`raw/redpill`. Em ambos, o D100 é representado por dois D10 para dezenas e
-unidades. `/personalizar` permite ao usuário alternar entre `Cósmico`, `Redpill`
-e `Azul`, com persistência gratuita no KV. A rota pública `/dice/combat-roll`
+Os conjuntos completos `Redpill`, `Eniripsa` e `Begins` seguem o mesmo contrato
+em suas pastas `*-compact` e `raw/*`. Neles, o D100 é representado por dois D10
+para dezenas e unidades. `/personalizar` permite ao usuário alternar entre
+`Cósmico`, `Redpill`, `Eniripsa`, `Begins` e `Azul`, com persistência gratuita no
+KV. A rota pública `/dice/combat-roll`
 fornece o D20 seguro do battlemap e mantém no Firestore somente as 20 rolagens
 recentes de cada mesa ativa.
 
 As faces compactas usam conteúdo máximo de 84 × 84 dentro de uma tela transparente
 de 100 × 100. `scripts/validate_cosmic_assets.py` garante dimensões, derivados RGBA
-e pelo menos oito pixels de margem nos conjuntos Cósmico e Redpill, evitando cortes
+e pelo menos oito pixels de margem nos quatro conjuntos completos, evitando cortes
 na composição do Discord. Os
 extratores também validam o maior componente de cada célula antes da compactação;
 se uma divisão da folha atravessar um dado, a geração falha em vez de publicar uma

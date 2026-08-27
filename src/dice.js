@@ -4,8 +4,8 @@ const DICE_EMOJI = "<:d20:1537217597077200997>";
 const DEFAULT_EMBED_COLOR = 0x315bd6;
 const CRITICAL_EMBED_COLOR = 0xd3a64a;
 const FAILURE_EMBED_COLOR = 0x9f2f3f;
-const DICE_STYLES = new Set(["cosmic", "redpill", "blue"]);
-const COMPLETE_DICE_STYLES = new Set(["cosmic", "redpill"]);
+const DICE_STYLES = new Set(["cosmic", "redpill", "eniripsa", "begins", "blue"]);
+const COMPLETE_DICE_STYLES = new Set(["cosmic", "redpill", "eniripsa", "begins"]);
 const CUSTOM_DICE = new Set(["d4", "d6", "d8", "d10", "d12", "d20"]);
 const textEncoder = new TextEncoder();
 
@@ -367,6 +367,16 @@ export async function personalizeDiceInteractionPayload(interaction, origin, sec
       description: "D4, D6, D8, D10, D12, D20 e D100 agora usam o conjunto Redpill completo.",
       color: 0xc92f2f,
     },
+    eniripsa: {
+      label: "Eniripsa",
+      description: "D4, D6, D8, D10, D12, D20 e D100 agora usam o conjunto Eniripsa completo.",
+      color: 0xd986c7,
+    },
+    begins: {
+      label: "Begins",
+      description: "D4, D6, D8, D10, D12, D20 e D100 agora usam o conjunto Begins completo.",
+      color: 0x9ca9c8,
+    },
     blue: {
       label: "Azul",
       description: "Todas as suas rolagens voltaram a usar o conjunto clássico azul.",
@@ -436,6 +446,8 @@ export const DICE_PERSONALIZE_COMMAND_DEFINITION = {
     choices: [
       { name: "Cósmico (padrão)", value: "cosmic" },
       { name: "Redpill", value: "redpill" },
+      { name: "Eniripsa", value: "eniripsa" },
+      { name: "Begins", value: "begins" },
       { name: "Azul", value: "blue" },
     ],
   }],

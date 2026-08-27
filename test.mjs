@@ -250,6 +250,22 @@ assert.deepEqual(requestedRedpillAssets, [
   '/dice/raw/redpill/d6/d6s6.rgba',
 ])
 
+for (const style of ['eniripsa', 'begins']) {
+  const path = await createDiceImagePath([{ die: 'd20', face: 20 }], diceImageSecret, style)
+  let requestedAsset = ''
+  const response = await renderDiceImage(new Request(`https://dice.stasis.test${path}`), {
+    DICE_IMAGE_SECRET: diceImageSecret,
+    ASSETS: {
+      fetch: async (request) => {
+        requestedAsset = new URL(request.url).pathname
+        return new Response(new Uint8Array([137, 80, 78, 71]))
+      },
+    },
+  })
+  assert.equal(response.status, 200)
+  assert.equal(requestedAsset, `/dice/source/${style}-compact/d20/d20s20.png`)
+}
+
 const criticalInteraction = await diceInteractionPayload({
   data: { options: [{ name: 'rolagem', value: 'd20@Lance de Percepção' }] },
   member: { nick: 'Aventureiro', user: { username: 'jogador' } },
@@ -284,6 +300,8 @@ const blueInteraction = await diceInteractionPayload({
 const blueSignedUrl = new URL(blueInteraction.embeds[0].image.url)
 assert.equal((await readSignedDiceImagePath(blueSignedUrl.pathname, diceImageSecret)).style, 'blue')
 assert.equal(normalizeDiceStyle('redpill'), 'redpill')
+assert.equal(normalizeDiceStyle('eniripsa'), 'eniripsa')
+assert.equal(normalizeDiceStyle('begins'), 'begins')
 
 const personalizeInteraction = await personalizeDiceInteractionPayload({
   data: { options: [{ name: 'estilo', value: 'cosmic' }] },
@@ -294,6 +312,12 @@ const redpillPersonalizeInteraction = await personalizeDiceInteractionPayload({
   data: { options: [{ name: 'estilo', value: 'redpill' }] },
 }, 'https://dice.stasis.test', diceImageSecret)
 assert.equal(redpillPersonalizeInteraction.embeds[0].title.includes('Redpill'), true)
+for (const [style, label] of [['eniripsa', 'Eniripsa'], ['begins', 'Begins']]) {
+  const personalized = await personalizeDiceInteractionPayload({
+    data: { options: [{ name: 'estilo', value: style }] },
+  }, 'https://dice.stasis.test', diceImageSecret)
+  assert.equal(personalized.embeds[0].title.includes(label), true)
+}
 
 const combatHistory = appendCombatDiceHistory([
   { id: 'anterior', result: 7, createdAt: '2026-08-26T12:00:00.000Z' },
