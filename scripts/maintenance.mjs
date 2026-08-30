@@ -1,4 +1,4 @@
-import { randomUUID, webcrypto } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 const action = process.argv[process.argv.indexOf("--action") + 1] || "audit-catalogs";
 const projectId = process.env.FIREBASE_PROJECT_ID || "stasisrpg";
@@ -10,7 +10,6 @@ for (const name of [
   "FIREBASE_API_KEY",
   "FIREBASE_SERVICE_EMAIL",
   "FIREBASE_SERVICE_PASSWORD",
-  "SUBMISSION_CONFIRMATION_PRIVATE_KEY",
 ]) {
   if (!process.env[name]) throw new Error(`Variável obrigatória ausente: ${name}`);
 }
@@ -225,27 +224,6 @@ function synchronizeProfile(profile, catalogs) {
   };
 }
 
-async function privateKey() {
-  const stored = JSON.parse(process.env.SUBMISSION_CONFIRMATION_PRIVATE_KEY);
-  const jwk = { ...stored };
-  delete jwk.alg;
-  delete jwk.key_ops;
-  delete jwk.use;
-  return webcrypto.subtle.importKey(
-    "jwk",
-    jwk,
-    { name: "RSA-PSS", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-}
-
-async function signature(payload, key) {
-  return Buffer.from(await webcrypto.subtle.sign(
-    { name: "RSA-PSS", saltLength: 32 }, key, new TextEncoder().encode(payload),
-  )).toString("base64");
-}
-
 function encodeValue(value) {
   if (value === null || value === undefined) return { nullValue: null };
   if (typeof value === "string") return { stringValue: value };
@@ -255,7 +233,7 @@ function encodeValue(value) {
   return { mapValue: { fields: Object.fromEntries(Object.entries(value).map(([name, nested]) => [name, encodeValue(nested)])) } };
 }
 
-async function reconcileCatalogs(apply) {
+async function auditCatalogs() {
   const [optionDocuments, profileDocuments] = await Promise.all([
     listCollection("characterOptionVersions"),
     listCollection("playerProfilesCurrent"),
@@ -272,7 +250,7 @@ async function reconcileCatalogs(apply) {
   const blocked = plans.filter((item) => item.blocked);
   const actionable = plans.filter((item) => !item.blocked);
   console.log(JSON.stringify({
-    mode: apply ? "reconcile" : "audit",
+    mode: "audit",
     races: catalogs.races.length,
     classes: catalogs.classes.length,
     playerProfiles: profileDocuments.length,
@@ -282,43 +260,12 @@ async function reconcileCatalogs(apply) {
     details: plans.map((item) => ({ character: item.before.characterName, reasons: item.reasons })),
   }, null, 2));
   if (blocked.length) throw new Error(`Há fichas sem vínculo: ${blocked.map((item) => item.before.characterName).join(", ")}`);
-  if (!apply) {
-    if (actionable.length) process.exitCode = 2;
-    return;
-  }
-  if (!actionable.length) return;
-  const key = await privateKey();
-  for (const plan of actionable) {
-    const item = plan.profile;
-    const payload = JSON.stringify(item);
-    const now = item.updatedAt;
-    const record = {
-      schemaVersion: 1,
-      profileId: item.id,
-      ownerUid: item.ownerUid,
-      accountId: item.accountId,
-      version: item.version,
-      payload,
-      signature: await signature(payload, key),
-      createdAt: now,
-    };
-    const fields = Object.fromEntries(Object.entries(record).map(([name, value]) => [name, name === "createdAt" ? { timestampValue: value } : encodeValue(value)]));
-    const versionName = `${root}/playerProfileVersions/${randomUUID()}`;
-    const response = await fetch(commitUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ writes: [
-        { update: { name: versionName, fields }, currentDocument: { exists: false } },
-        { update: { name: plan.document.name, fields }, currentDocument: { updateTime: plan.document.updateTime } },
-      ] }),
-    });
-    if (!response.ok) throw new Error(`${item.characterName}: ${response.status} ${await response.text()}`);
-    console.log(`Sincronizado: ${item.characterName} · versão ${item.version}`);
-  }
+  if (actionable.length) process.exitCode = 2;
 }
 
 async function publishNews() {
   if (!process.env.NEWS_PAYLOAD_BASE64) throw new Error("Payload da notícia ausente.");
+  if (!process.env.NEWS_SIGNATURE_BASE64) throw new Error("Assinatura editorial ausente.");
   const payload = Buffer.from(process.env.NEWS_PAYLOAD_BASE64, "base64").toString("utf8");
   const article = JSON.parse(payload);
   if (!article?.id || !article?.title || !article?.slug || article.active !== true || article.deleted) {
@@ -328,20 +275,21 @@ async function publishNews() {
   const duplicate = existing.some((document) => {
     try {
       const current = JSON.parse(field(document, "payload"));
-      return current.slug === article.slug && current.active && !current.deleted;
+      return current.slug === article.slug && current.active && !current.deleted && (
+        current.id !== article.id || Number(current.version || 0) >= Number(article.version || 0)
+      );
     } catch { return false; }
   });
   if (duplicate) {
     console.log(`Notícia já publicada: ${article.slug}`);
     return;
   }
-  const key = await privateKey();
   const record = {
     schemaVersion: 1,
     newsId: article.id,
     version: article.version,
     payload,
-    signature: await signature(payload, key),
+    signature: process.env.NEWS_SIGNATURE_BASE64,
     active: true,
     deleted: false,
     title: article.title.slice(0, 180),
@@ -357,7 +305,6 @@ async function publishNews() {
   console.log(JSON.stringify({ published: true, id: article.id, slug: article.slug, title: article.title }, null, 2));
 }
 
-if (action === "audit-catalogs") await reconcileCatalogs(false);
-else if (action === "reconcile-catalogs") await reconcileCatalogs(true);
+if (action === "audit-catalogs") await auditCatalogs();
 else if (action === "publish-news") await publishNews();
 else throw new Error(`Ação desconhecida: ${action}`);
