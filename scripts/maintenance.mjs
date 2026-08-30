@@ -226,9 +226,14 @@ function synchronizeProfile(profile, catalogs) {
 }
 
 async function privateKey() {
+  const stored = JSON.parse(process.env.SUBMISSION_CONFIRMATION_PRIVATE_KEY);
+  const jwk = { ...stored };
+  delete jwk.alg;
+  delete jwk.key_ops;
+  delete jwk.use;
   return webcrypto.subtle.importKey(
     "jwk",
-    { ...JSON.parse(process.env.SUBMISSION_CONFIRMATION_PRIVATE_KEY), alg: undefined },
+    jwk,
     { name: "RSA-PSS", hash: "SHA-256" },
     false,
     ["sign"],
