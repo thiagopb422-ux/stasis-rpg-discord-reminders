@@ -1,0 +1,42 @@
+name: Manutenção do Stasis
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Operação segura a executar
+        required: true
+        type: choice
+        options:
+          - audit-catalogs
+          - reconcile-catalogs
+          - publish-news
+      news_payload_base64:
+        description: Payload editorial assinado no executor
+        required: false
+        type: string
+
+concurrency:
+  group: stasis-maintenance
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Baixar a manutenção
+        uses: actions/checkout@v5
+
+      - name: Auditar ou publicar
+        env:
+          FIREBASE_PROJECT_ID: stasisrpg
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_SERVICE_EMAIL: ${{ secrets.FIREBASE_SERVICE_EMAIL }}
+          FIREBASE_SERVICE_PASSWORD: ${{ secrets.FIREBASE_SERVICE_PASSWORD }}
+          SUBMISSION_CONFIRMATION_PRIVATE_KEY: ${{ secrets.SUBMISSION_CONFIRMATION_PRIVATE_KEY }}
+          NEWS_PAYLOAD_BASE64: ${{ inputs.news_payload_base64 }}
+        run: node scripts/maintenance.mjs --action "${{ inputs.action }}"
